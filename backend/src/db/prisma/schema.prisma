@@ -1,0 +1,120 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Vendor {
+  id             Int       @id @default(autoincrement())
+  slug           String    @unique
+  name           String
+  businessName   String    @map("business_name")
+  email          String
+  qbCustomerId   String    @map("qb_customer_id")
+  telegramChatId String?   @map("telegram_chat_id")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  accounts VendorAccount[]
+  invoices Invoice[]
+
+  @@map("vendors")
+}
+
+enum Platform {
+  PLAY777
+  ICONNECT
+}
+
+model VendorAccount {
+  id         Int      @id @default(autoincrement())
+  vendorId   Int      @map("vendor_id")
+  platform   Platform
+  username   String
+  operatorId String?  @map("operator_id")
+  rate       Decimal  @db.Decimal(5, 4)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  vendor          Vendor           @relation(fields: [vendorId], references: [id])
+  invoiceAllocations InvoiceAllocation[]
+  loadJobs        LoadJob[]
+
+  @@map("vendor_accounts")
+}
+
+enum InvoiceStatus {
+  REQUESTED
+  PENDING
+  PAID
+  LOADING
+  LOADED
+  FAILED
+}
+
+model Invoice {
+  id          Int           @id @default(autoincrement())
+  vendorId    Int           @map("vendor_id")
+  qbInvoiceId String?       @map("qb_invoice_id")
+  method      String
+  baseAmount  Decimal       @map("base_amount") @db.Decimal(10, 2)
+  feeAmount   Decimal       @map("fee_amount") @db.Decimal(10, 2)
+  totalAmount Decimal       @map("total_amount") @db.Decimal(10, 2)
+  status      InvoiceStatus @default(REQUESTED)
+  submittedAt DateTime      @default(now()) @map("submitted_at")
+  paidAt      DateTime?     @map("paid_at")
+  loadedAt    DateTime?     @map("loaded_at")
+
+  vendor      Vendor              @relation(fields: [vendorId], references: [id])
+  allocations InvoiceAllocation[]
+  loadJobs    LoadJob[]
+
+  @@map("invoices")
+}
+
+// Per-account dollar/credit split for each invoice
+model InvoiceAllocation {
+  id              Int     @id @default(autoincrement())
+  invoiceId       Int     @map("invoice_id")
+  vendorAccountId Int     @map("vendor_account_id")
+  dollarAmount    Decimal @map("dollar_amount") @db.Decimal(10, 2)
+  credits         Int
+
+  invoice       Invoice       @relation(fields: [invoiceId], references: [id])
+  vendorAccount VendorAccount @relation(fields: [vendorAccountId], references: [id])
+
+  @@map("invoice_allocations")
+}
+
+enum LoadJobStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+model LoadJob {
+  id              Int           @id @default(autoincrement())
+  invoiceId       Int           @map("invoice_id")
+  vendorAccountId Int           @map("vendor_account_id")
+  creditsAmount   Int           @map("credits_amount")
+  status          LoadJobStatus @default(PENDING)
+  attempts        Int           @default(0)
+  errorMessage    String?       @map("error_message")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  completedAt     DateTime?     @map("completed_at")
+
+  invoice       Invoice       @relation(fields: [invoiceId], references: [id])
+  vendorAccount VendorAccount @relation(fields: [vendorAccountId], references: [id])
+
+  @@map("load_jobs")
+}
+
+model AdminUser {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("admin_users")
+}

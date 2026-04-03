@@ -1,0 +1,28 @@
+{
+  "name": "wokeavr-creditloader-backend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "nodemon src/index.js",
+    "start": "node src/index.js",
+    "db:migrate": "npx prisma migrate dev --schema=src/db/prisma/schema.prisma",
+    "db:generate": "npx prisma generate --schema=src/db/prisma/schema.prisma",
+    "db:studio": "npx prisma studio --schema=src/db/prisma/schema.prisma"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.0.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.0",
+    "express": "^4.18.0",
+    "intuit-oauth": "^4.2.2",
+    "jsonwebtoken": "^9.0.0",
+    "node-quickbooks": "^2.0.0",
+    "node-telegram-bot-api": "^0.65.0",
+    "playwright": "^1.40.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.0",
+    "prisma": "^5.0.0"
+  }
+}
