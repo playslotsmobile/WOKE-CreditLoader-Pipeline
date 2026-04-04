@@ -4,6 +4,7 @@ require('dotenv').config({ path: require('path').join(__dirname, '..', '.env'), 
 
 const formRoutes = require('./routes/forms');
 const webhookRoutes = require('./routes/webhooks');
+const adminRoutes = require('./routes/admin');
 
 const app = express();
 app.use(cors());
@@ -205,6 +206,7 @@ app.get('/api/vendors/:slug', (req, res) => {
 
 app.use('/api', formRoutes);
 app.use('/api', webhookRoutes);
+app.use('/api/admin', adminRoutes);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
