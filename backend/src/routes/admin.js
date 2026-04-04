@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const telegram = require('../services/telegram');
 const prisma = require('../db/client');
+const autoloader = require('../services/autoloader');
 
 // Get all invoices with allocations
 router.get('/invoices', async (req, res) => {
@@ -63,41 +64,19 @@ router.post('/invoices/:id/confirm-wire', async (req, res) => {
     if (invoice.method !== 'Wire') return res.status(400).json({ error: 'Not a wire invoice' });
     if (invoice.status !== 'PENDING') return res.status(400).json({ error: 'Invoice not in PENDING status' });
 
-    // TODO Phase 5: trigger auto-loader here. For now mark as LOADED.
-    const updated = await prisma.invoice.update({
+    // Mark as paid, then trigger auto-loader
+    await prisma.invoice.update({
       where: { id },
-      data: { status: 'LOADED', paidAt: new Date(), loadedAt: new Date() },
+      data: { status: 'PAID', paidAt: new Date() },
     });
 
-    const vendorData = {
-      name: invoice.vendor.name,
-      businessName: invoice.vendor.businessName,
-      email: invoice.vendor.email,
-      telegramChatId: invoice.vendor.telegramChatId,
-    };
+    // Respond immediately, process load in background
+    res.json({ success: true, message: 'Wire confirmed, loading credits...' });
 
-    const invoiceData = {
-      id: invoice.id,
-      qbInvoiceId: invoice.qbInvoiceId,
-      method: invoice.method,
-      baseAmount: Number(invoice.baseAmount),
-    };
-
-    const allocs = invoice.allocations.map((a) => ({
-      dollarAmount: Number(a.dollarAmount),
-      credits: a.credits,
-      platform: a.vendorAccount.platform,
-      username: a.vendorAccount.username,
-      operatorId: a.vendorAccount.operatorId,
-    }));
-
-    try {
-      await telegram.sendLoaded(vendorData, invoiceData, allocs);
-    } catch (err) {
-      console.error('Telegram loaded notification failed:', err.message);
-    }
-
-    res.json({ success: true, invoice: updated });
+    // Auto-load in background
+    autoloader.processInvoice(id).catch((err) => {
+      console.error('Auto-loader failed for wire invoice:', err.message);
+    });
   } catch (err) {
     console.error('Confirm wire error:', err);
     res.status(500).json({ error: 'Failed to confirm wire' });
@@ -108,51 +87,17 @@ router.post('/invoices/:id/confirm-wire', async (req, res) => {
 router.post('/invoices/:id/trigger-load', async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const invoice = await prisma.invoice.findUnique({
-      where: { id },
-      include: {
-        vendor: true,
-        allocations: { include: { vendorAccount: true } },
-      },
-    });
+    const invoice = await prisma.invoice.findUnique({ where: { id } });
 
     if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
 
-    // TODO Phase 5: trigger auto-loader. For now mark as LOADED.
-    const updated = await prisma.invoice.update({
-      where: { id },
-      data: { status: 'LOADED', loadedAt: new Date() },
+    // Respond immediately, process load in background
+    res.json({ success: true, message: 'Loading credits...' });
+
+    // Auto-load in background
+    autoloader.processInvoice(id).catch((err) => {
+      console.error('Auto-loader failed:', err.message);
     });
-
-    const vendorData = {
-      name: invoice.vendor.name,
-      businessName: invoice.vendor.businessName,
-      email: invoice.vendor.email,
-      telegramChatId: invoice.vendor.telegramChatId,
-    };
-
-    const invoiceData = {
-      id: invoice.id,
-      qbInvoiceId: invoice.qbInvoiceId,
-      method: invoice.method,
-      baseAmount: Number(invoice.baseAmount),
-    };
-
-    const allocations = invoice.allocations.map((a) => ({
-      dollarAmount: Number(a.dollarAmount),
-      credits: a.credits,
-      platform: a.vendorAccount.platform,
-      username: a.vendorAccount.username,
-      operatorId: a.vendorAccount.operatorId,
-    }));
-
-    try {
-      await telegram.sendLoaded(vendorData, invoiceData, allocations);
-    } catch (err) {
-      console.error('Telegram loaded notification failed:', err.message);
-    }
-
-    res.json({ success: true, invoice: updated });
   } catch (err) {
     console.error('Trigger load error:', err);
     res.status(500).json({ error: 'Failed to trigger load' });
