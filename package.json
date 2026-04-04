@@ -2,7 +2,8 @@
   "name": "wokeavr-creditloader-pipeline",
   "private": true,
   "scripts": {
-    "postinstall": "cd backend && npm install",
+    "postinstall": "cd backend && npm install && cd ../frontend && npm install",
+    "build": "cd frontend && npx vite build",
     "start": "cd backend && node src/index.js"
   },
   "engines": {

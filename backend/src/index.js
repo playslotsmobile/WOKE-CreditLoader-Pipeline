@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
-require('dotenv').config({ path: require('path').join(__dirname, '..', '.env'), override: true });
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '..', '.env'), override: true });
 
 const formRoutes = require('./routes/forms');
 const webhookRoutes = require('./routes/webhooks');
@@ -207,6 +208,13 @@ app.get('/api/vendors/:slug', (req, res) => {
 app.use('/api', formRoutes);
 app.use('/api', webhookRoutes);
 app.use('/api/admin', adminRoutes);
+
+// Serve frontend static files
+const publicPath = path.join(__dirname, '..', 'public');
+app.use(express.static(publicPath));
+app.get('*', (req, res) => {
+  res.sendFile(path.join(publicPath, 'index.html'));
+});
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
