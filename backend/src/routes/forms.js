@@ -2,82 +2,106 @@ const express = require('express');
 const router = express.Router();
 const quickbooks = require('../services/quickbooks');
 const telegram = require('../services/telegram');
-
-// In-memory store until DB is live
-const invoices = [];
-let nextInvoiceId = 1;
+const prisma = require('../db/client');
 
 router.post('/submit-invoice', async (req, res) => {
   try {
     const { vendorSlug, method, baseAmount, feeAmount, totalAmount, allocations } = req.body;
 
-    // Find vendor from the in-memory list
-    const vendors = req.app.get('vendors');
-    const vendor = vendors.find((v) => v.slug === vendorSlug);
-    if (!vendor) {
-      return res.status(404).json({ error: 'Vendor not found' });
-    }
+    const vendor = await prisma.vendor.findUnique({
+      where: { slug: vendorSlug },
+      include: { accounts: true },
+    });
+    if (!vendor) return res.status(404).json({ error: 'Vendor not found' });
 
     const isWire = method === 'Wire';
+    const methodLabel = isWire ? 'Wire' : method === 'ACH' ? 'ACH (1%)' : 'Credit/Debit (3%)';
 
-    // Build invoice record
-    const invoice = {
-      id: nextInvoiceId++,
-      vendorSlug,
-      qbInvoiceId: null,
-      method: isWire ? 'Wire' : method === 'ACH' ? 'ACH (1%)' : 'Credit/Debit (3%)',
+    // Create invoice in DB
+    const invoice = await prisma.invoice.create({
+      data: {
+        vendorId: vendor.id,
+        method: methodLabel,
+        baseAmount,
+        feeAmount,
+        totalAmount,
+        status: isWire ? 'PENDING' : 'REQUESTED',
+      },
+    });
+
+    // Create allocations in DB
+    const enrichedAllocations = [];
+    for (const a of allocations) {
+      if (a.dollarAmount <= 0) continue;
+      const alloc = await prisma.invoiceAllocation.create({
+        data: {
+          invoiceId: invoice.id,
+          vendorAccountId: a.accountId,
+          dollarAmount: a.dollarAmount,
+          credits: a.credits,
+        },
+        include: { vendorAccount: true },
+      });
+      enrichedAllocations.push({
+        ...a,
+        platform: alloc.vendorAccount.platform,
+        username: alloc.vendorAccount.username,
+        operatorId: alloc.vendorAccount.operatorId,
+      });
+    }
+
+    // Format vendor for telegram
+    const vendorData = {
+      name: vendor.name,
+      businessName: vendor.businessName,
+      email: vendor.email,
+      telegramChatId: vendor.telegramChatId,
+      qbCustomerName: vendor.qbCustomerId,
+    };
+
+    const invoiceData = {
+      id: invoice.id,
+      qbInvoiceId: invoice.qbInvoiceId,
+      method: methodLabel,
       baseAmount,
       feeAmount,
       totalAmount,
-      status: isWire ? 'PENDING' : 'REQUESTED',
-      submittedAt: new Date().toISOString(),
-      paidAt: null,
-      loadedAt: null,
     };
 
-    // Enrich allocations with account info
-    const enrichedAllocations = allocations.map((a) => {
-      const acct = vendor.accounts.find((acc) => acc.id === a.accountId);
-      return { ...a, ...acct };
-    });
-
     if (isWire) {
-      invoices.push({ invoice, allocations: enrichedAllocations });
       try {
-        await telegram.sendWireSubmitted(vendor, invoice, enrichedAllocations);
+        await telegram.sendWireSubmitted(vendorData, invoiceData, enrichedAllocations);
       } catch (err) {
         console.error('Telegram wire notification failed:', err.message);
       }
     } else {
+      // Create QB invoice
       try {
-        const qbInvoice = await quickbooks.createInvoice(vendor, invoice, enrichedAllocations);
-        invoice.qbInvoiceId = qbInvoice.DocNumber || qbInvoice.Id;
-        invoice.status = 'REQUESTED';
+        const qbInvoice = await quickbooks.createInvoice(vendorData, invoiceData, enrichedAllocations);
+        const qbId = qbInvoice.DocNumber || String(qbInvoice.Id);
+        await prisma.invoice.update({
+          where: { id: invoice.id },
+          data: { qbInvoiceId: qbId },
+        });
+        invoiceData.qbInvoiceId = qbId;
       } catch (err) {
         console.error('QB invoice creation failed:', err.message);
-        invoice.qbInvoiceId = 'QB-PENDING';
+        invoiceData.qbInvoiceId = 'QB-PENDING';
       }
 
-      invoices.push({ invoice, allocations: enrichedAllocations });
       try {
-        await telegram.sendInvoiceSent(vendor, invoice, enrichedAllocations);
+        await telegram.sendInvoiceSent(vendorData, invoiceData, enrichedAllocations);
       } catch (err) {
         console.error('Telegram invoice notification failed:', err.message);
       }
     }
 
-    console.log('Invoice saved:', invoice);
-    res.json({ success: true, invoiceId: invoice.id, qbInvoiceId: invoice.qbInvoiceId });
+    console.log('Invoice saved:', invoice.id);
+    res.json({ success: true, invoiceId: invoice.id, qbInvoiceId: invoiceData.qbInvoiceId });
   } catch (err) {
     console.error('Submit invoice error:', err);
     res.status(500).json({ error: 'Failed to submit invoice' });
   }
 });
 
-// Get all invoices (for admin dashboard)
-router.get('/invoices', (req, res) => {
-  res.json(invoices);
-});
-
 module.exports = router;
-module.exports.invoices = invoices;
