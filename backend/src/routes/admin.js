@@ -63,7 +63,7 @@ router.post('/invoices/:id/confirm-wire', async (req, res) => {
     if (invoice.method !== 'Wire') return res.status(400).json({ error: 'Not a wire invoice' });
     if (invoice.status !== 'PENDING') return res.status(400).json({ error: 'Invoice not in PENDING status' });
 
-    // TODO Phase 5: trigger auto-loader. For now mark as LOADED.
+    // TODO Phase 5: trigger auto-loader here. For now mark as LOADED.
     const updated = await prisma.invoice.update({
       where: { id },
       data: { status: 'LOADED', paidAt: new Date(), loadedAt: new Date() },
@@ -83,7 +83,7 @@ router.post('/invoices/:id/confirm-wire', async (req, res) => {
       baseAmount: Number(invoice.baseAmount),
     };
 
-    const allocations = invoice.allocations.map((a) => ({
+    const allocs = invoice.allocations.map((a) => ({
       dollarAmount: Number(a.dollarAmount),
       credits: a.credits,
       platform: a.vendorAccount.platform,
@@ -92,7 +92,7 @@ router.post('/invoices/:id/confirm-wire', async (req, res) => {
     }));
 
     try {
-      await telegram.sendLoaded(vendorData, invoiceData, allocations);
+      await telegram.sendLoaded(vendorData, invoiceData, allocs);
     } catch (err) {
       console.error('Telegram loaded notification failed:', err.message);
     }
