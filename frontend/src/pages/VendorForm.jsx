@@ -110,7 +110,7 @@ export default function VendorForm() {
   );
 
   const wireValid =
-    !isWire || (wireReceipt && base >= config?.min && base <= config?.max);
+    !isWire || (base >= (config?.min || 0) && base <= (config?.max || Infinity));
   const canSubmit = method && base > 0 && splitValid && !submitting && wireValid;
 
   async function handleSubmit(e) {
@@ -138,16 +138,7 @@ export default function VendorForm() {
         allocations: accountAllocations,
       };
 
-      if (isWire && wireReceipt) {
-        const formData = new FormData();
-        formData.append('data', JSON.stringify(payload));
-        formData.append('wireReceipt', wireReceipt);
-        await axios.post('/api/submit-invoice', formData, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
-      } else {
-        await axios.post('/api/submit-invoice', payload);
-      }
+      await axios.post('/api/submit-invoice', payload);
       setSubmitted(true);
     } catch (err) {
       alert(
