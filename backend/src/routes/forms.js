@@ -42,23 +42,28 @@ router.post('/submit-invoice', async (req, res) => {
     });
 
     if (isWire) {
-      // Wire: no QB invoice, just save and notify
       invoices.push({ invoice, allocations: enrichedAllocations });
-      await telegram.sendWireSubmitted(vendor, invoice, enrichedAllocations);
+      try {
+        await telegram.sendWireSubmitted(vendor, invoice, enrichedAllocations);
+      } catch (err) {
+        console.error('Telegram wire notification failed:', err.message);
+      }
     } else {
-      // Card/ACH: create QB invoice and notify
       try {
         const qbInvoice = await quickbooks.createInvoice(vendor, invoice, enrichedAllocations);
         invoice.qbInvoiceId = qbInvoice.DocNumber || qbInvoice.Id;
         invoice.status = 'REQUESTED';
       } catch (err) {
         console.error('QB invoice creation failed:', err.message);
-        // Still save the invoice locally even if QB fails
-        invoice.qbInvoiceId = 'QB-ERROR';
+        invoice.qbInvoiceId = 'QB-PENDING';
       }
 
       invoices.push({ invoice, allocations: enrichedAllocations });
-      await telegram.sendInvoiceSent(vendor, invoice, enrichedAllocations);
+      try {
+        await telegram.sendInvoiceSent(vendor, invoice, enrichedAllocations);
+      } catch (err) {
+        console.error('Telegram invoice notification failed:', err.message);
+      }
     }
 
     console.log('Invoice saved:', invoice);
