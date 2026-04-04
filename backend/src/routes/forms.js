@@ -1,12 +1,20 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
 const quickbooks = require('../services/quickbooks');
 const telegram = require('../services/telegram');
 const prisma = require('../db/client');
 
-router.post('/submit-invoice', async (req, res) => {
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) => {
   try {
-    const { vendorSlug, method, baseAmount, feeAmount, totalAmount, allocations } = req.body;
+    // Wire submissions send data as JSON string in 'data' field
+    let body = req.body;
+    if (body.data) {
+      body = JSON.parse(body.data);
+    }
+    const { vendorSlug, method, baseAmount, feeAmount, totalAmount, allocations } = body;
 
     const vendor = await prisma.vendor.findUnique({
       where: { slug: vendorSlug },
