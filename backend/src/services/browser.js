@@ -1,13 +1,15 @@
 const { chromium } = require('playwright');
 const path = require('path');
-const fs = require('fs');
 
-const SESSION_DIR = path.join(__dirname, '..', '..', 'sessions');
+// AdsPower API config
+const ADSPOWER_API = 'http://local.adspower.net:50325';
+const ADSPOWER_TOKEN = process.env.ADSPOWER_API_KEY;
 
-// Ensure sessions directory exists
-if (!fs.existsSync(SESSION_DIR)) {
-  fs.mkdirSync(SESSION_DIR, { recursive: true });
-}
+// AdsPower profile IDs per platform
+const PROFILE_IDS = {
+  play777: process.env.ADSPOWER_PLAY777_ID,
+  iconnect: process.env.ADSPOWER_ICONNECT_ID,
+};
 
 // Human-like delay — randomized to look natural
 function humanDelay(min = 800, max = 2500) {
@@ -15,64 +17,74 @@ function humanDelay(min = 800, max = 2500) {
   return new Promise((r) => setTimeout(r, delay));
 }
 
-// Type like a human — variable speed per character
+// Type like a human — variable speed per character with occasional pauses
 async function humanType(page, selector, text) {
   await page.click(selector);
   await humanDelay(300, 600);
-  for (const char of text) {
-    await page.keyboard.type(char, { delay: Math.floor(Math.random() * 120) + 40 });
-  }
-}
-
-// Get a browser context with persistent session for a platform
-async function getBrowserContext(platform) {
-  const sessionPath = path.join(SESSION_DIR, `${platform}-session.json`);
-  const headless = process.env.HEADLESS !== 'false';
-
-  const browser = await chromium.launch({
-    headless,
-    args: [
-      '--disable-blink-features=AutomationControlled',
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-web-security',
-      '--lang=en-US,en',
-    ],
-  });
-
-  // Load saved session if it exists
-  let storageState;
-  if (fs.existsSync(sessionPath)) {
-    try {
-      storageState = JSON.parse(fs.readFileSync(sessionPath, 'utf8'));
-    } catch (e) {
-      console.log(`${platform}: Invalid session file, starting fresh`);
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (i > 0 && Math.random() < 0.08) {
+      await humanDelay(400, 1200);
     }
+    await page.keyboard.type(char, { delay: Math.floor(Math.random() * 150) + 30 });
+  }
+}
+
+// Simulate subtle mouse movement — real users don't teleport between clicks
+async function humanMouseMove(page) {
+  const x = 200 + Math.floor(Math.random() * 800);
+  const y = 150 + Math.floor(Math.random() * 400);
+  await page.mouse.move(x, y, { steps: 5 + Math.floor(Math.random() * 10) });
+}
+
+// Launch an AdsPower profile and connect Playwright to it
+async function getBrowserContext(platform) {
+  const profileId = PROFILE_IDS[platform];
+  if (!profileId) {
+    throw new Error(`No AdsPower profile ID configured for platform: ${platform}. Set ADSPOWER_${platform.toUpperCase()}_ID in .env`);
   }
 
-  const context = await browser.newContext({
-    storageState: storageState || undefined,
-    viewport: { width: 1366, height: 768 },
-    userAgent:
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-    locale: 'en-US',
-    timezoneId: 'America/Chicago',
+  // Start the AdsPower browser profile
+  const startUrl = `${ADSPOWER_API}/api/v1/browser/start?user_id=${profileId}`;
+  const res = await fetch(startUrl, {
+    headers: { 'Authorization': `Bearer ${ADSPOWER_TOKEN}` },
   });
+  const data = await res.json();
 
-  return { browser, context, sessionPath };
+  if (data.code !== 0) {
+    throw new Error(`AdsPower failed to start profile: ${data.msg}`);
+  }
+
+  const wsUrl = data.data.ws.puppeteer;
+  const debugPort = data.data.debug_port;
+  console.log(`${platform}: AdsPower profile launched (port ${debugPort})`);
+
+  // Connect Playwright via CDP
+  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${debugPort}`);
+  const context = browser.contexts()[0];
+
+  return { browser, context, profileId, debugPort };
 }
 
-// Save session cookies/storage after login
-async function saveSession(context, sessionPath) {
-  const state = await context.storageState();
-  fs.writeFileSync(sessionPath, JSON.stringify(state, null, 2));
-  console.log('Session saved.');
+// Close the AdsPower browser profile
+async function closeBrowser(session) {
+  if (session.profileId) {
+    const stopUrl = `${ADSPOWER_API}/api/v1/browser/stop?user_id=${session.profileId}`;
+    await fetch(stopUrl, {
+      headers: { 'Authorization': `Bearer ${ADSPOWER_TOKEN}` },
+    }).catch(() => {});
+    console.log('AdsPower profile closed.');
+  }
 }
+
+// No-op — AdsPower handles session persistence automatically
+async function saveSession() {}
 
 module.exports = {
   getBrowserContext,
+  closeBrowser,
   saveSession,
   humanDelay,
   humanType,
+  humanMouseMove,
 };

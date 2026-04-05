@@ -29,17 +29,20 @@ enum Platform {
 }
 
 model VendorAccount {
-  id         Int      @id @default(autoincrement())
-  vendorId   Int      @map("vendor_id")
-  platform   Platform
-  username   String
-  operatorId String?  @map("operator_id")
-  rate       Decimal  @db.Decimal(5, 4)
-  createdAt  DateTime @default(now()) @map("created_at")
+  id                Int      @id @default(autoincrement())
+  vendorId          Int      @map("vendor_id")
+  platform          Platform
+  username          String
+  operatorId        String?  @map("operator_id")
+  rate              Decimal  @db.Decimal(5, 4)
+  loadType          String   @default("vendor") @map("load_type") // vendor, operator, correction
+  parentVendorAccId Int?     @map("parent_vendor_acc_id") // for operators: the vendor account to load first
+  chainToAccId      Int?     @map("chain_to_acc_id") // for chain loads: operator account to load after vendor
+  createdAt         DateTime @default(now()) @map("created_at")
 
-  vendor          Vendor           @relation(fields: [vendorId], references: [id])
+  vendor             Vendor              @relation(fields: [vendorId], references: [id])
   invoiceAllocations InvoiceAllocation[]
-  loadJobs        LoadJob[]
+  loadJobs           LoadJob[]
 
   @@map("vendor_accounts")
 }

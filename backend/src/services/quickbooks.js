@@ -152,8 +152,14 @@ async function getInvoice(invoiceId) {
   return data.Invoice;
 }
 
+async function getPayment(paymentId) {
+  const data = await qbRequest('GET', `payment/${paymentId}`);
+  return data.Payment;
+}
+
 module.exports = {
   findCustomer,
   createInvoice,
   getInvoice,
+  getPayment,
 };

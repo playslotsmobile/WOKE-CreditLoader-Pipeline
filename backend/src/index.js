@@ -10,7 +10,14 @@ const adminRoutes = require('./routes/admin');
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({
+  verify: (req, res, buf) => {
+    // Preserve raw body for QB webhook HMAC verification
+    if (req.originalUrl === '/api/qb-webhook') {
+      req.rawBody = buf.toString('utf8');
+    }
+  },
+}));
 
 // Make prisma available to routes
 app.set('prisma', prisma);
@@ -39,6 +46,9 @@ app.get('/api/vendors/:slug', async (req, res) => {
         username: a.username,
         operatorId: a.operatorId,
         rate: a.rate.toString(),
+        loadType: a.loadType,
+        chainToAccId: a.chainToAccId,
+        parentVendorAccId: a.parentVendorAccId,
       })),
     });
   } catch (err) {

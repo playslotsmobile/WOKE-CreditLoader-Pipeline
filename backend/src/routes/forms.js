@@ -112,4 +112,80 @@ router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) =>
   }
 });
 
+// Submit a correction — moves credits FROM a source vendor to target accounts
+router.post('/submit-correction', async (req, res) => {
+  try {
+    const { vendorSlug, sourceAccountId, corrections } = req.body;
+
+    const vendor = await prisma.vendor.findUnique({
+      where: { slug: vendorSlug },
+      include: { accounts: true },
+    });
+    if (!vendor) return res.status(404).json({ error: 'Vendor not found' });
+
+    const sourceAccount = vendor.accounts.find((a) => a.id === sourceAccountId);
+    if (!sourceAccount) {
+      return res.status(400).json({ error: 'Source account not found' });
+    }
+
+    // Calculate total credits needed
+    const totalCredits = corrections.reduce((sum, c) => sum + c.credits, 0);
+    if (totalCredits <= 0) {
+      return res.status(400).json({ error: 'No credits to correct' });
+    }
+
+    // Create invoice record for the correction
+    const invoice = await prisma.invoice.create({
+      data: {
+        vendorId: vendor.id,
+        method: 'Correction',
+        baseAmount: 0,
+        feeAmount: 0,
+        totalAmount: 0,
+        status: 'REQUESTED',
+      },
+    });
+
+    // Create allocations
+    for (const c of corrections) {
+      if (c.credits <= 0) continue;
+      await prisma.invoiceAllocation.create({
+        data: {
+          invoiceId: invoice.id,
+          vendorAccountId: c.accountId,
+          dollarAmount: 0,
+          credits: c.credits,
+        },
+      });
+    }
+
+    // Send Telegram notification
+    try {
+      const vendorData = {
+        name: vendor.name,
+        businessName: vendor.businessName,
+        telegramChatId: vendor.telegramChatId,
+      };
+
+      const correctionDetails = corrections
+        .filter((c) => c.credits > 0)
+        .map((c) => `${c.username}: ${c.credits} credits`)
+        .join('\n');
+
+      await telegram.bot.sendMessage(
+        process.env.TELEGRAM_ADMIN_CHAT_ID,
+        `📋 Correction Request from ${vendor.name}\n\nSource: ${sourceAccount.username} (${sourceAccount.operatorId})\n\n${correctionDetails}\n\nTotal: ${totalCredits} credits\nInvoice #${invoice.id}`
+      );
+    } catch (err) {
+      console.error('Telegram correction notification failed:', err.message);
+    }
+
+    console.log('Correction saved:', invoice.id);
+    res.json({ success: true, invoiceId: invoice.id });
+  } catch (err) {
+    console.error('Submit correction error:', err);
+    res.status(500).json({ error: 'Failed to submit correction' });
+  }
+});
+
 module.exports = router;
