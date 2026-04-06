@@ -122,14 +122,31 @@ async function fillDepositModal(page, credits, transactionType = 'deposit') {
 }
 
 // Load credits to a vendor account via Vendors Overview page
+async function filterToVendor(page, username, operatorId) {
+  // Click the "All Vendors" multiselect filter
+  const vendorFilter = page.locator('.multiselect').first();
+  await vendorFilter.click();
+  await humanDelay(1000, 2000);
+
+  // Find and click the vendor option
+  const option = page.locator(`li:has-text("${username}")`).first();
+  await option.waitFor({ timeout: 10000 });
+  await option.click();
+  await humanDelay(3000, 5000);
+
+  // Wait for the filtered row to appear
+  const row = page.locator(`tr:has(a[onclick="return showAgentDrawer(${operatorId})"])`);
+  await row.waitFor({ timeout: 30000 });
+  return row;
+}
+
 async function loadVendor(page, account, credits, transactionType = 'deposit') {
-  // Navigate to Vendors Overview filtered to this specific vendor
-  await page.goto(`${VENDORS_URL}?vendor_id=${account.operatorId}`, { waitUntil: 'networkidle', timeout: 60000 });
+  // Navigate to Vendors Overview
+  await page.goto(VENDORS_URL, { waitUntil: 'networkidle', timeout: 60000 });
   await humanDelay(5000, 8000);
 
-  // Wait for the filtered vendor row to appear
-  const row = page.locator(`tr:has(a[onclick="return showAgentDrawer(${account.operatorId})"])`);
-  await row.waitFor({ timeout: 30000 });
+  // Filter to this specific vendor
+  const row = await filterToVendor(page, account.username, account.operatorId);
   await row.scrollIntoViewIfNeeded();
   await humanDelay(500, 1000);
 
@@ -146,13 +163,12 @@ async function loadVendor(page, account, credits, transactionType = 'deposit') {
 
 // Load credits to an operator under a vendor via the operators drawer
 async function loadOperator(page, vendor, operator, credits, transactionType = 'deposit') {
-  // Navigate to Vendors Overview filtered to this specific vendor
-  await page.goto(`${VENDORS_URL}?vendor_id=${vendor.operatorId}`, { waitUntil: 'networkidle', timeout: 60000 });
+  // Navigate to Vendors Overview
+  await page.goto(VENDORS_URL, { waitUntil: 'networkidle', timeout: 60000 });
   await humanDelay(5000, 8000);
 
-  // Wait for the filtered vendor row to appear
-  const vendorRow = page.locator(`tr:has(a[onclick="return showAgentDrawer(${vendor.operatorId})"])`);
-  await vendorRow.waitFor({ timeout: 30000 });
+  // Filter to this specific vendor
+  const vendorRow = await filterToVendor(page, vendor.username, vendor.operatorId);
   await vendorRow.scrollIntoViewIfNeeded();
   await humanDelay(500, 1000);
 
