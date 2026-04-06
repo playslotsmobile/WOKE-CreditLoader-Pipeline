@@ -84,27 +84,37 @@ export default function AdminDashboard() {
     <div className="min-h-screen bg-[#0f1117] text-gray-100">
       {/* Header */}
       <header className="border-b border-gray-800 bg-[#161922]">
-        <div className="max-w-full mx-auto px-6 py-4 flex justify-between items-center">
-          <div className="flex items-center gap-4">
-            <h1 className="text-lg font-bold tracking-tight">
-              <span className="text-blue-400">WOKE</span>
-              <span className="text-gray-400">AVR</span>
-            </h1>
-            <div className="h-5 w-px bg-gray-700"></div>
-            <span className="text-sm text-gray-500">Credit Loader</span>
-          </div>
-
-          <div className="flex items-center gap-6">
-            {/* Stats */}
-            <div className="flex items-center gap-4 text-xs">
-              <Stat label="Total" value={invoices.length} color="text-gray-400" />
-              <Stat label="Action Needed" value={actionNeeded} color={actionNeeded > 0 ? 'text-amber-400' : 'text-gray-500'} />
-              <Stat label="Loaded" value={counts.LOADED} color="text-green-400" />
+        <div className="max-w-full mx-auto px-4 sm:px-6 py-3 sm:py-4">
+          {/* Top row: logo + refresh */}
+          <div className="flex justify-between items-center">
+            <div className="flex items-center gap-4">
+              <h1 className="text-lg font-bold tracking-tight">
+                <span className="text-blue-400">WOKE</span>
+                <span className="text-gray-400">AVR</span>
+              </h1>
+              <div className="h-5 w-px bg-gray-700 hidden sm:block"></div>
+              <span className="text-sm text-gray-500 hidden sm:inline">Credit Loader</span>
             </div>
 
-            <div className="h-5 w-px bg-gray-700"></div>
+            <div className="flex items-center gap-3 sm:gap-6">
+              {/* Stats */}
+              <div className="flex items-center gap-3 sm:gap-4 text-xs">
+                <Stat label="Total" value={invoices.length} color="text-gray-400" />
+                <Stat label="Action" value={actionNeeded} color={actionNeeded > 0 ? 'text-amber-400' : 'text-gray-500'} />
+                <Stat label="Loaded" value={counts.LOADED} color="text-green-400" />
+              </div>
 
-            {/* View Toggle */}
+              <button
+                onClick={fetchInvoices}
+                className="text-xs px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-white transition"
+              >
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          {/* Bottom row: view toggle */}
+          <div className="flex mt-3 sm:mt-2">
             <div className="flex bg-gray-800 rounded-lg p-0.5">
               <button
                 onClick={() => setView('pipeline')}
@@ -125,18 +135,11 @@ export default function AdminDashboard() {
                 Vendors
               </button>
             </div>
-
-            <button
-              onClick={fetchInvoices}
-              className="text-xs px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-white transition"
-            >
-              Refresh
-            </button>
           </div>
         </div>
       </header>
 
-      <main className="p-6">
+      <main className="p-3 sm:p-6">
         {view === 'pipeline' ? (
           <InvoicePipeline
             invoices={invoices}
@@ -173,8 +176,8 @@ function ListView({ invoices, onConfirmWire, onTriggerLoad }) {
   }
 
   return (
-    <div className="bg-[#161922] rounded-xl border border-gray-800 overflow-hidden">
-      <table className="w-full text-sm">
+    <div className="bg-[#161922] rounded-xl border border-gray-800 overflow-x-auto">
+      <table className="w-full text-sm min-w-[640px]">
         <thead>
           <tr className="border-b border-gray-800 text-left text-xs text-gray-500 uppercase tracking-wider">
             <th className="px-4 py-3">Vendor</th>
@@ -247,7 +250,7 @@ function VendorLeaderboard({ vendors }) {
   return (
     <div>
       {/* Summary Cards */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-6">
         <SummaryCard label="Total Revenue" value={`$${(totalSpentAll / 1000).toFixed(0)}k`} sub="All vendors" color="text-green-400" />
         <SummaryCard label="Total Credits" value={(totalCreditsAll / 1000000).toFixed(2) + 'M'} sub="Loaded lifetime" color="text-blue-400" />
         <SummaryCard label="Total Invoices" value={totalInvoicesAll} sub="All time" color="text-purple-400" />
@@ -255,8 +258,8 @@ function VendorLeaderboard({ vendors }) {
       </div>
 
       {/* Leaderboard */}
-      <div className="bg-[#161922] rounded-xl border border-gray-800 overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="bg-[#161922] rounded-xl border border-gray-800 overflow-x-auto">
+        <table className="w-full text-sm min-w-[768px]">
           <thead>
             <tr className="border-b border-gray-800 text-left text-xs text-gray-500 uppercase tracking-wider">
               <th className="px-4 py-3 w-12">#</th>

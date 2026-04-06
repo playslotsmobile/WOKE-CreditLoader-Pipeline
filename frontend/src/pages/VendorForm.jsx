@@ -242,15 +242,15 @@ export default function VendorForm() {
   const methodLabel = method || '...';
   const colClass =
     invoiceAccounts.length <= 2
-      ? 'grid-cols-2'
+      ? 'grid-cols-1 sm:grid-cols-2'
       : invoiceAccounts.length <= 3
-      ? 'grid-cols-3'
-      : 'grid-cols-4';
+      ? 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3'
+      : 'grid-cols-1 sm:grid-cols-2 md:grid-cols-4';
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8 px-4">
+    <div className="min-h-screen bg-gray-50 py-4 px-3 sm:py-8 sm:px-4">
       <div className="max-w-4xl mx-auto">
-        <div className="bg-white rounded-lg shadow-md p-8">
+        <div className="bg-white rounded-lg shadow-md p-4 sm:p-8">
           <h1 className="text-2xl font-bold text-gray-900 mb-6">
             {vendor.name} Invoice Request
           </h1>
@@ -287,13 +287,13 @@ export default function VendorForm() {
           {activeTab === 'invoice' && (
             <>
               {/* Row 1: Name | Business Name */}
-              <div className="grid grid-cols-2 gap-6 mb-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-6">
                 <LockedField label="Name" value={vendor.name} />
                 <LockedField label="Business Name" value={vendor.businessName} />
               </div>
 
               {/* Row 2: Email | Payment Method */}
-              <div className="grid grid-cols-2 gap-6 mb-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-6">
                 <LockedField label="Email (Business)" value={vendor.email} />
                 <div>
                   <Label required>Credit/Debit, ACH, or Wire?</Label>
@@ -314,7 +314,7 @@ export default function VendorForm() {
               <form onSubmit={handleInvoiceSubmit}>
                 {/* Base Amount */}
                 {method && (
-                  <div className="grid grid-cols-2 gap-6 mb-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-6">
                     <div>
                       <Label required>{methodLabel} (Base)</Label>
                       {isWire ? (
@@ -376,7 +376,7 @@ export default function VendorForm() {
 
                 {/* Total w/ Fee */}
                 {method && !isWire && base > 0 && (
-                  <div className="grid grid-cols-2 gap-6 mb-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-6">
                     <div>
                       <p className="text-sm font-semibold text-gray-900">
                         Total ({methodLabel} w/ Fee)
@@ -394,7 +394,7 @@ export default function VendorForm() {
 
                 {/* Per-account allocation fields */}
                 {base > 0 && (
-                  <div className={`grid ${colClass} gap-6 mb-6`}>
+                  <div className={`grid ${colClass} gap-4 sm:gap-6 mb-6`}>
                     {invoiceAccounts.map((acct) => {
                       // For chain loads, show what happens
                       const chainTarget = acct.chainToAccId
@@ -450,7 +450,7 @@ export default function VendorForm() {
 
                 {/* Credits per account */}
                 {splitValid && (
-                  <div className={`grid ${colClass} gap-6 mb-6`}>
+                  <div className={`grid ${colClass} gap-4 sm:gap-6 mb-6`}>
                     {invoiceAccounts.map((acct) => {
                       const amt = parseFloat(allocations[acct.id]) || 0;
                       if (amt <= 0) return null;
@@ -493,7 +493,7 @@ export default function VendorForm() {
                 <button
                   type="submit"
                   disabled={!canSubmit}
-                  className={`px-8 py-3 rounded-md text-white font-semibold transition ${
+                  className={`w-full sm:w-auto px-8 py-3 rounded-md text-white font-semibold transition ${
                     canSubmit
                       ? 'bg-amber-700 hover:bg-amber-800 cursor-pointer'
                       : 'bg-gray-300 cursor-not-allowed'
@@ -529,7 +529,7 @@ export default function VendorForm() {
                     </p>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-6 mb-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-6">
                     {correctionAccounts.map((acct) => (
                       <div key={acct.id}>
                         <Label>
@@ -573,7 +573,7 @@ export default function VendorForm() {
                   <button
                     type="submit"
                     disabled={!canSubmitCorrection}
-                    className={`px-8 py-3 rounded-md text-white font-semibold transition ${
+                    className={`w-full sm:w-auto px-8 py-3 rounded-md text-white font-semibold transition ${
                       canSubmitCorrection
                         ? 'bg-amber-700 hover:bg-amber-800 cursor-pointer'
                         : 'bg-gray-300 cursor-not-allowed'

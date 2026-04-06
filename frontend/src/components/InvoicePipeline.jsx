@@ -35,7 +35,7 @@ export default function InvoicePipeline({ invoices, statuses, onConfirmWire, onT
         const items = invoices.filter((i) => i.invoice.status === status);
 
         return (
-          <div key={status} className="flex-shrink-0 w-72">
+          <div key={status} className="flex-shrink-0 w-64 sm:w-72">
             <div className={`h-full rounded-xl bg-[#161922] border ${COLUMN_STYLES[config.color]} p-3`}>
               {/* Column Header */}
               <div className="flex items-center justify-between mb-4">
