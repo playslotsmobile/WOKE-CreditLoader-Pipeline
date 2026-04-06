@@ -7,7 +7,7 @@ const USERNAME = process.env.PLAY777_USERNAME;
 const PASSWORD = process.env.PLAY777_PASSWORD;
 
 async function ensureLoggedIn(page) {
-  await page.goto(DASHBOARD_URL, { waitUntil: 'networkidle', timeout: 90000 });
+  await page.goto(DASHBOARD_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await humanDelay(2000, 4000);
 
   if (!page.url().includes('/login')) {
@@ -138,14 +138,15 @@ async function fillDepositModal(page, credits, transactionType = 'deposit') {
 
 // Load credits to a vendor account via Vendors Overview page
 async function loadVendor(page, account, credits, transactionType = 'deposit') {
-  // Navigate to Vendors Overview
-  await page.goto(VENDORS_URL, { waitUntil: 'networkidle', timeout: 90000 });
+  // Navigate to Vendors Overview — use domcontentloaded since networkidle
+  // never resolves (Play777 has persistent connections/websockets)
+  await page.goto(VENDORS_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.setViewportSize({ width: 1920, height: 1080 });
   await humanDelay(5000, 8000);
 
   // Find the vendor row by agent ID
   const row = page.locator(`tr:has(a[onclick="return showAgentDrawer(${account.operatorId})"])`);
-  await row.waitFor({ state: 'attached', timeout: 30000 });
+  await row.waitFor({ state: 'attached', timeout: 60000 });
   await row.scrollIntoViewIfNeeded();
   await humanDelay(500, 1000);
 
@@ -163,13 +164,13 @@ async function loadVendor(page, account, credits, transactionType = 'deposit') {
 // Load credits to an operator under a vendor via the operators drawer
 async function loadOperator(page, vendor, operator, credits, transactionType = 'deposit') {
   // Navigate to Vendors Overview
-  await page.goto(VENDORS_URL, { waitUntil: 'networkidle', timeout: 90000 });
+  await page.goto(VENDORS_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.setViewportSize({ width: 1920, height: 1080 });
   await humanDelay(5000, 8000);
 
   // Find the vendor row
   const vendorRow = page.locator(`tr:has(a[onclick="return showAgentDrawer(${vendor.operatorId})"])`);
-  await vendorRow.waitFor({ state: 'attached', timeout: 30000 });
+  await vendorRow.waitFor({ state: 'attached', timeout: 60000 });
   await vendorRow.scrollIntoViewIfNeeded();
   await humanDelay(500, 1000);
 
