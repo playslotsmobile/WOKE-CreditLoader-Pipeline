@@ -191,8 +191,9 @@ async function loadCredits(account, credits, parentVendor, transactionType = 'de
   try {
     session = await getBrowserContext('play777');
     const context = session.context;
-    const pages = context.pages();
-    page = pages.find((p) => p.url().includes('play777')) || await context.newPage();
+    // Always use a fresh page to avoid stale state
+    page = await context.newPage();
+    await page.setViewportSize({ width: 1920, height: 1080 });
 
     const loggedIn = await ensureLoggedIn(page);
     if (!loggedIn) throw new Error('Failed to login to Play777');
