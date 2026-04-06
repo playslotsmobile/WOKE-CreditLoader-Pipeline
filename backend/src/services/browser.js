@@ -44,8 +44,9 @@ async function getBrowserContext(platform) {
     throw new Error(`No AdsPower profile ID configured for platform: ${platform}. Set ADSPOWER_${platform.toUpperCase()}_ID in .env`);
   }
 
-  // Start the AdsPower browser profile
-  const startUrl = `${ADSPOWER_API}/api/v1/browser/start?user_id=${profileId}`;
+  // Start the AdsPower browser profile (--no-sandbox required for Linux root)
+  const launchArgs = encodeURIComponent(JSON.stringify(['--no-sandbox']));
+  const startUrl = `${ADSPOWER_API}/api/v1/browser/start?user_id=${profileId}&launch_args=${launchArgs}`;
   const res = await fetch(startUrl, {
     headers: { 'Authorization': `Bearer ${ADSPOWER_TOKEN}` },
   });
