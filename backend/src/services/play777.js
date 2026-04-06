@@ -122,35 +122,15 @@ async function fillDepositModal(page, credits, transactionType = 'deposit') {
 }
 
 // Load credits to a vendor account via Vendors Overview page
-async function filterToVendor(page, username, operatorId) {
-  // Use JavaScript to select the vendor in the Vue multiselect and trigger table reload
-  await page.evaluate(({ username, operatorId }) => {
-    // Find the vendor filter Vue component
-    const multiselects = document.querySelectorAll('.multiselect');
-    const vendorFilter = multiselects[0]; // First multiselect is "All Vendors"
-    if (vendorFilter && vendorFilter.__vue__) {
-      const vm = vendorFilter.__vue__;
-      const option = vm.options.find(o => o.name && o.name.includes(username));
-      if (option) {
-        vm.select(option);
-      }
-    }
-  }, { username, operatorId });
-  await humanDelay(5000, 8000);
-
-  // Wait for the filtered row to appear
-  const row = page.locator(`tr:has(a[onclick="return showAgentDrawer(${operatorId})"])`);
-  await row.waitFor({ state: 'attached', timeout: 30000 });
-  return row;
-}
-
 async function loadVendor(page, account, credits, transactionType = 'deposit') {
   // Navigate to Vendors Overview
   await page.goto(VENDORS_URL, { waitUntil: 'networkidle', timeout: 60000 });
+  await page.setViewportSize({ width: 1920, height: 1080 });
   await humanDelay(5000, 8000);
 
-  // Filter to this specific vendor
-  const row = await filterToVendor(page, account.username, account.operatorId);
+  // Find the vendor row by agent ID
+  const row = page.locator(`tr:has(a[onclick="return showAgentDrawer(${account.operatorId})"])`);
+  await row.waitFor({ state: 'attached', timeout: 30000 });
   await row.scrollIntoViewIfNeeded();
   await humanDelay(500, 1000);
 
@@ -169,10 +149,12 @@ async function loadVendor(page, account, credits, transactionType = 'deposit') {
 async function loadOperator(page, vendor, operator, credits, transactionType = 'deposit') {
   // Navigate to Vendors Overview
   await page.goto(VENDORS_URL, { waitUntil: 'networkidle', timeout: 60000 });
+  await page.setViewportSize({ width: 1920, height: 1080 });
   await humanDelay(5000, 8000);
 
-  // Filter to this specific vendor
-  const vendorRow = await filterToVendor(page, vendor.username, vendor.operatorId);
+  // Find the vendor row
+  const vendorRow = page.locator(`tr:has(a[onclick="return showAgentDrawer(${vendor.operatorId})"])`);
+  await vendorRow.waitFor({ state: 'attached', timeout: 30000 });
   await vendorRow.scrollIntoViewIfNeeded();
   await humanDelay(500, 1000);
 
