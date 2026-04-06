@@ -89,8 +89,15 @@ async function fillDepositModal(page, credits, transactionType = 'deposit') {
   }
 
   // Enter credits amount
+  // Deposit modal: single number input inside .input-group
+  // Correction modal: two number inputs — "Correction Payment Amount" (index 0) and "Enter Correction Amount" (index 1)
   await humanMouseMove(page);
-  const creditsInput = form.locator('.input-group input[type="number"]');
+  let creditsInput;
+  if (transactionType === 'correction') {
+    creditsInput = form.locator('input[type="number"]').nth(1);
+  } else {
+    creditsInput = form.locator('.input-group input[type="number"]');
+  }
   await creditsInput.waitFor({ state: 'attached', timeout: 5000 });
   await creditsInput.click();
   await humanDelay(300, 600);
