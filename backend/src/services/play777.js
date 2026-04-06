@@ -123,15 +123,11 @@ async function fillDepositModal(page, credits, transactionType = 'deposit') {
 
 // Load credits to a vendor account via Vendors Overview page
 async function loadVendor(page, account, credits, transactionType = 'deposit') {
-  // Navigate to Vendors Overview
-  await page.goto(VENDORS_URL, { waitUntil: 'networkidle', timeout: 60000 });
+  // Navigate to Vendors Overview filtered to this specific vendor
+  await page.goto(`${VENDORS_URL}?vendor_id=${account.operatorId}`, { waitUntil: 'networkidle', timeout: 60000 });
   await humanDelay(5000, 8000);
 
-  // Wait for vendor data to load — look for any agent drawer link
-  await page.waitForSelector('a[onclick*="showAgentDrawer"]', { timeout: 30000 });
-  await humanDelay(2000, 3000);
-
-  // Find the vendor row by agent ID
+  // Wait for the filtered vendor row to appear
   const row = page.locator(`tr:has(a[onclick="return showAgentDrawer(${account.operatorId})"])`);
   await row.waitFor({ timeout: 30000 });
   await row.scrollIntoViewIfNeeded();
@@ -150,15 +146,11 @@ async function loadVendor(page, account, credits, transactionType = 'deposit') {
 
 // Load credits to an operator under a vendor via the operators drawer
 async function loadOperator(page, vendor, operator, credits, transactionType = 'deposit') {
-  // Navigate to Vendors Overview
-  await page.goto(VENDORS_URL, { waitUntil: 'networkidle', timeout: 60000 });
+  // Navigate to Vendors Overview filtered to this specific vendor
+  await page.goto(`${VENDORS_URL}?vendor_id=${vendor.operatorId}`, { waitUntil: 'networkidle', timeout: 60000 });
   await humanDelay(5000, 8000);
 
-  // Wait for vendor data to load
-  await page.waitForSelector('a[onclick*="showAgentDrawer"]', { timeout: 30000 });
-  await humanDelay(2000, 3000);
-
-  // Find the vendor row and click people icon (index 4)
+  // Wait for the filtered vendor row to appear
   const vendorRow = page.locator(`tr:has(a[onclick="return showAgentDrawer(${vendor.operatorId})"])`);
   await vendorRow.waitFor({ timeout: 30000 });
   await vendorRow.scrollIntoViewIfNeeded();
