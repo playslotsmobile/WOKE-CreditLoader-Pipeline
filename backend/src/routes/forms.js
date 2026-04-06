@@ -3,6 +3,7 @@ const router = express.Router();
 const multer = require('multer');
 const quickbooks = require('../services/quickbooks');
 const telegram = require('../services/telegram');
+const autoloader = require('../services/autoloader');
 const prisma = require('../db/client');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -182,6 +183,11 @@ router.post('/submit-correction', async (req, res) => {
 
     console.log('Correction saved:', invoice.id);
     res.json({ success: true, invoiceId: invoice.id });
+
+    // Auto-trigger correction load immediately
+    autoloader.processInvoice(invoice.id).catch((err) => {
+      console.error('Correction auto-load failed:', err.message);
+    });
   } catch (err) {
     console.error('Submit correction error:', err);
     res.status(500).json({ error: 'Failed to submit correction' });
