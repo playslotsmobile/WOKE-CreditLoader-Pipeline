@@ -63,6 +63,15 @@ async function processInvoice(invoiceId) {
       console.log(`Correction: ${alloc.credits} credits from ${source.username} to ${account.username}`);
 
       // Load via Play777 with correction transaction type
+      // For operator accounts, pass the parent vendor so loadOperator is used
+      let parentVendor = null;
+      if (account.loadType === 'operator' && account.parentVendorAccId) {
+        const parentAcc = vendor.accounts.find((a) => a.id === account.parentVendorAccId);
+        if (parentAcc) {
+          parentVendor = { username: parentAcc.username, operatorId: parentAcc.operatorId };
+        }
+      }
+
       let result;
       if (DRY_RUN) {
         console.log(`[DRY RUN] Would load correction: ${alloc.credits} credits to ${account.username} (${account.operatorId}) on Play777`);
@@ -71,7 +80,7 @@ async function processInvoice(invoiceId) {
         result = await play777.loadCredits(
           { username: account.username, operatorId: account.operatorId },
           alloc.credits,
-          null,
+          parentVendor,
           'correction'
         );
       }
