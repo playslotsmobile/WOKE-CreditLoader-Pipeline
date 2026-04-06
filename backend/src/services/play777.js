@@ -125,11 +125,15 @@ async function fillDepositModal(page, credits, transactionType = 'deposit') {
 async function loadVendor(page, account, credits, transactionType = 'deposit') {
   // Navigate to Vendors Overview
   await page.goto(VENDORS_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  await humanDelay(3000, 5000);
+  await humanDelay(5000, 8000);
+
+  // Wait for the vendor table to fully load
+  await page.waitForSelector('table tbody tr', { state: 'visible', timeout: 30000 });
+  await humanDelay(2000, 3000);
 
   // Find the vendor row by agent ID
   const row = page.locator(`tr:has(a[onclick="return showAgentDrawer(${account.operatorId})"])`);
-  await row.waitFor({ state: 'visible', timeout: 10000 });
+  await row.waitFor({ state: 'visible', timeout: 30000 });
   await row.scrollIntoViewIfNeeded();
   await humanDelay(500, 1000);
 
@@ -148,11 +152,15 @@ async function loadVendor(page, account, credits, transactionType = 'deposit') {
 async function loadOperator(page, vendor, operator, credits, transactionType = 'deposit') {
   // Navigate to Vendors Overview
   await page.goto(VENDORS_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  await humanDelay(3000, 5000);
+  await humanDelay(5000, 8000);
+
+  // Wait for the vendor table to fully load
+  await page.waitForSelector('table tbody tr', { state: 'visible', timeout: 30000 });
+  await humanDelay(2000, 3000);
 
   // Find the vendor row and click people icon (index 4)
   const vendorRow = page.locator(`tr:has(a[onclick="return showAgentDrawer(${vendor.operatorId})"])`);
-  await vendorRow.waitFor({ state: 'visible', timeout: 10000 });
+  await vendorRow.waitFor({ state: 'visible', timeout: 30000 });
   await vendorRow.scrollIntoViewIfNeeded();
   await humanDelay(500, 1000);
 
@@ -165,7 +173,7 @@ async function loadOperator(page, vendor, operator, credits, transactionType = '
   // Find the operator row — the people icon expands an inline operators table
   // Use .last() to match the one in the expanded section, not the main vendor table
   const operatorRow = page.locator(`tr:has(a[onclick="return showAgentDrawer(${operator.operatorId})"])`).last();
-  await operatorRow.waitFor({ state: 'visible', timeout: 10000 });
+  await operatorRow.waitFor({ state: 'visible', timeout: 30000 });
   await operatorRow.scrollIntoViewIfNeeded();
   await humanDelay(500, 1000);
 
