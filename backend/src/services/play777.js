@@ -7,7 +7,7 @@ const USERNAME = process.env.PLAY777_USERNAME;
 const PASSWORD = process.env.PLAY777_PASSWORD;
 
 async function ensureLoggedIn(page) {
-  await page.goto(DASHBOARD_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.goto(DASHBOARD_URL, { waitUntil: 'networkidle', timeout: 90000 });
   await humanDelay(2000, 4000);
 
   if (!page.url().includes('/login')) {
@@ -139,7 +139,7 @@ async function fillDepositModal(page, credits, transactionType = 'deposit') {
 // Load credits to a vendor account via Vendors Overview page
 async function loadVendor(page, account, credits, transactionType = 'deposit') {
   // Navigate to Vendors Overview
-  await page.goto(VENDORS_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.goto(VENDORS_URL, { waitUntil: 'networkidle', timeout: 90000 });
   await page.setViewportSize({ width: 1920, height: 1080 });
   await humanDelay(5000, 8000);
 
@@ -163,7 +163,7 @@ async function loadVendor(page, account, credits, transactionType = 'deposit') {
 // Load credits to an operator under a vendor via the operators drawer
 async function loadOperator(page, vendor, operator, credits, transactionType = 'deposit') {
   // Navigate to Vendors Overview
-  await page.goto(VENDORS_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.goto(VENDORS_URL, { waitUntil: 'networkidle', timeout: 90000 });
   await page.setViewportSize({ width: 1920, height: 1080 });
   await humanDelay(5000, 8000);
 
