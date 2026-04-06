@@ -146,7 +146,7 @@ async function loadVendor(page, account, credits, transactionType = 'deposit') {
 
   // Find the vendor row by agent ID
   const row = page.locator(`tr:has(a[onclick="return showAgentDrawer(${account.operatorId})"])`);
-  await row.waitFor({ state: 'attached', timeout: 60000 });
+  await row.waitFor({ state: 'attached', timeout: 120000 });
   await row.scrollIntoViewIfNeeded();
   await humanDelay(500, 1000);
 
@@ -170,7 +170,7 @@ async function loadOperator(page, vendor, operator, credits, transactionType = '
 
   // Find the vendor row
   const vendorRow = page.locator(`tr:has(a[onclick="return showAgentDrawer(${vendor.operatorId})"])`);
-  await vendorRow.waitFor({ state: 'attached', timeout: 60000 });
+  await vendorRow.waitFor({ state: 'attached', timeout: 120000 });
   await vendorRow.scrollIntoViewIfNeeded();
   await humanDelay(500, 1000);
 
