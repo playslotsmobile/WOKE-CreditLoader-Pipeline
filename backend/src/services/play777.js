@@ -61,7 +61,7 @@ async function ensureLoggedIn(page) {
 // transactionType: 'deposit' (default) or 'correction'
 async function fillDepositModal(page, credits, transactionType = 'deposit') {
   const form = page.locator('#app-form-agent-balance');
-  await form.waitFor({ state: 'visible', timeout: 10000 });
+  await form.waitFor({ state: 'attached', timeout: 10000 });
   await humanDelay(800, 1500);
 
   // Switch transaction type if needed (default is Deposit)
@@ -70,7 +70,7 @@ async function fillDepositModal(page, credits, transactionType = 'deposit') {
     await txTypeSelect.click();
     await humanDelay(500, 1000);
     const correctionOption = form.locator('li[aria-label="Correction"]');
-    await correctionOption.waitFor({ state: 'visible', timeout: 5000 });
+    await correctionOption.waitFor({ state: 'attached', timeout: 5000 });
     await correctionOption.click();
     await humanDelay(800, 1500);
   }
@@ -83,14 +83,14 @@ async function fillDepositModal(page, credits, transactionType = 'deposit') {
   await humanDelay(500, 1000);
 
   const wireOption = form.locator('li[aria-label="Wire Transfer"]');
-  await wireOption.waitFor({ state: 'visible', timeout: 5000 });
+  await wireOption.waitFor({ state: 'attached', timeout: 5000 });
   await wireOption.click();
   await humanDelay(800, 1500);
 
   // Enter credits amount
   await humanMouseMove(page);
   const creditsInput = form.locator('.input-group input[type="number"]');
-  await creditsInput.waitFor({ state: 'visible', timeout: 5000 });
+  await creditsInput.waitFor({ state: 'attached', timeout: 5000 });
   await creditsInput.click();
   await humanDelay(300, 600);
   await creditsInput.fill(String(credits));
@@ -106,7 +106,7 @@ async function fillDepositModal(page, credits, transactionType = 'deposit') {
 
   // Confirm deposit popup
   const confirmBtn = page.locator('button:has-text("Confirm Deposit")').first();
-  await confirmBtn.waitFor({ state: 'visible', timeout: 10000 });
+  await confirmBtn.waitFor({ state: 'attached', timeout: 10000 });
   await humanDelay(1000, 2000);
   await confirmBtn.click();
 
@@ -134,9 +134,9 @@ async function filterToVendor(page, username, operatorId) {
   await option.click();
   await humanDelay(3000, 5000);
 
-  // Wait for the filtered row to appear
+  // Wait for the filtered row to appear (use 'attached' state — elements may not be 'visible' on virtual display)
   const row = page.locator(`tr:has(a[onclick="return showAgentDrawer(${operatorId})"])`);
-  await row.waitFor({ timeout: 30000 });
+  await row.waitFor({ state: 'attached', timeout: 30000 });
   return row;
 }
 
@@ -181,7 +181,7 @@ async function loadOperator(page, vendor, operator, credits, transactionType = '
   // Find the operator row — the people icon expands an inline operators table
   // Use .last() to match the one in the expanded section, not the main vendor table
   const operatorRow = page.locator(`tr:has(a[onclick="return showAgentDrawer(${operator.operatorId})"])`).last();
-  await operatorRow.waitFor({ timeout: 30000 });
+  await operatorRow.waitFor({ state: 'attached', timeout: 30000 });
   await operatorRow.scrollIntoViewIfNeeded();
   await humanDelay(500, 1000);
 
