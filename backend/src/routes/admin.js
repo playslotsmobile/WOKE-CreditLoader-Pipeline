@@ -104,4 +104,50 @@ router.post('/invoices/:id/trigger-load', async (req, res) => {
   }
 });
 
+// Vendor stats (real data from DB)
+router.get('/vendor-stats', async (req, res) => {
+  try {
+    const vendors = await prisma.vendor.findMany({
+      include: {
+        invoices: {
+          include: { allocations: true },
+        },
+      },
+    });
+
+    const stats = vendors.map((v) => {
+      const loadedInvoices = v.invoices.filter((i) => i.status === 'LOADED');
+      const allInvoices = v.invoices.filter((i) => i.method !== 'Correction');
+      const totalSpent = allInvoices.reduce((s, i) => s + Number(i.baseAmount), 0);
+      const totalCredits = allInvoices.reduce(
+        (s, i) => s + i.allocations.reduce((a, al) => a + al.credits, 0),
+        0
+      );
+      const lastInvoice = v.invoices.length > 0
+        ? v.invoices.reduce((latest, i) =>
+            new Date(i.submittedAt) > new Date(latest.submittedAt) ? i : latest
+          )
+        : null;
+
+      return {
+        slug: v.slug,
+        name: v.name,
+        business: v.businessName,
+        totalSpent,
+        totalCredits,
+        invoiceCount: allInvoices.length,
+        loadedCount: loadedInvoices.length,
+        lastActive: lastInvoice?.submittedAt || null,
+      };
+    })
+    .filter((v) => v.invoiceCount > 0)
+    .sort((a, b) => b.totalSpent - a.totalSpent);
+
+    res.json(stats);
+  } catch (err) {
+    console.error('Vendor stats error:', err);
+    res.status(500).json({ error: 'Failed to fetch vendor stats' });
+  }
+});
+
 module.exports = router;

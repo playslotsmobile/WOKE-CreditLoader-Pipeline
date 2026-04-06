@@ -8,25 +8,7 @@ export default function AdminDashboard() {
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState('pipeline');
-  const [vendors, setVendors] = useState([]);
-
-  // Fake lifetime stats per vendor (until DB is live)
-  const vendorStats = [
-    { slug: 'cesar', name: 'Cesar Rivera', business: 'CGR SOFTWARE LLC', totalSpent: 142500, totalCredits: 407143, invoiceCount: 47, lastActive: '2026-04-01' },
-    { slug: 'claudia', name: 'Claudia Cardenas', business: 'JCSOFTWARE', totalSpent: 128300, totalCredits: 366571, invoiceCount: 41, lastActive: '2026-04-02' },
-    { slug: 'karla', name: 'Karla Rivera', business: 'LFM SOFTWARE LLC', totalSpent: 98700, totalCredits: 282000, invoiceCount: 33, lastActive: '2026-04-01' },
-    { slug: 'mike', name: 'Mike Perez', business: 'OSL DEVELOPMENT LLC', totalSpent: 87200, totalCredits: 235676, invoiceCount: 29, lastActive: '2026-03-30' },
-    { slug: 'yuli', name: 'Yuli', business: 'KKS SOFTWARE LLC', totalSpent: 76500, totalCredits: 191250, invoiceCount: 25, lastActive: '2026-04-02' },
-    { slug: 'venisa', name: 'Venisa Vasquez', business: 'Venisa Vasquez', totalSpent: 68400, totalCredits: 171000, invoiceCount: 22, lastActive: '2026-03-29' },
-    { slug: 'gilberto', name: 'Gilberto Rivera', business: 'GRR SOFTWARE LLC', totalSpent: 54200, totalCredits: 154857, invoiceCount: 18, lastActive: '2026-04-01' },
-    { slug: 'alex', name: 'Alex Noz', business: 'GREAT RED SOLUTIONS LLC', totalSpent: 48900, totalCredits: 139714, invoiceCount: 16, lastActive: '2026-04-02' },
-    { slug: 'luis', name: 'Luis Salinas', business: 'SaraLeasing LLC', totalSpent: 42300, totalCredits: 105750, invoiceCount: 14, lastActive: '2026-03-28' },
-    { slug: 'cody', name: 'Cody Trejo', business: 'Cody Trejo', totalSpent: 38700, totalCredits: 77400, invoiceCount: 13, lastActive: '2026-03-31' },
-    { slug: 'lorena', name: 'Lorena Delgado', business: 'DELGADO INNOVATIONS LLC', totalSpent: 35100, totalCredits: 100286, invoiceCount: 12, lastActive: '2026-03-27' },
-    { slug: 'lynette', name: 'Lynette', business: 'AC DRIP LLC', totalSpent: 31500, totalCredits: 78750, invoiceCount: 10, lastActive: '2026-03-30' },
-    { slug: 'jose', name: 'Jose Gracia', business: 'Jose Gracia', totalSpent: 27800, totalCredits: 92667, invoiceCount: 9, lastActive: '2026-03-25' },
-    { slug: 'leo', name: 'Leo', business: 'GS SOFTWARE LLC', totalSpent: 22400, totalCredits: 44800, invoiceCount: 7, lastActive: '2026-03-26' },
-  ];
+  const [vendorStats, setVendorStats] = useState([]);
 
   const fetchInvoices = useCallback(async () => {
     try {
@@ -39,11 +21,21 @@ export default function AdminDashboard() {
     }
   }, []);
 
+  const fetchVendorStats = useCallback(async () => {
+    try {
+      const res = await axios.get('/api/admin/vendor-stats');
+      setVendorStats(res.data);
+    } catch (err) {
+      console.error('Failed to fetch vendor stats:', err);
+    }
+  }, []);
+
   useEffect(() => {
     fetchInvoices();
+    fetchVendorStats();
     const interval = setInterval(fetchInvoices, 5000);
     return () => clearInterval(interval);
-  }, [fetchInvoices]);
+  }, [fetchInvoices, fetchVendorStats]);
 
   async function handleConfirmWire(invoiceId) {
     try {
@@ -243,6 +235,14 @@ function ListView({ invoices, onConfirmWire, onTriggerLoad }) {
 }
 
 function VendorLeaderboard({ vendors }) {
+  if (vendors.length === 0) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <p className="text-gray-500">No vendor activity yet. Stats will appear here once invoices are submitted.</p>
+      </div>
+    );
+  }
+
   const totalSpentAll = vendors.reduce((s, v) => s + v.totalSpent, 0);
   const totalCreditsAll = vendors.reduce((s, v) => s + v.totalCredits, 0);
   const totalInvoicesAll = vendors.reduce((s, v) => s + v.invoiceCount, 0);
@@ -251,10 +251,10 @@ function VendorLeaderboard({ vendors }) {
     <div>
       {/* Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-6">
-        <SummaryCard label="Total Revenue" value={`$${(totalSpentAll / 1000).toFixed(0)}k`} sub="All vendors" color="text-green-400" />
-        <SummaryCard label="Total Credits" value={(totalCreditsAll / 1000000).toFixed(2) + 'M'} sub="Loaded lifetime" color="text-blue-400" />
+        <SummaryCard label="Total Revenue" value={totalSpentAll >= 1000 ? `$${(totalSpentAll / 1000).toFixed(1)}k` : `$${totalSpentAll.toLocaleString()}`} sub="All vendors" color="text-green-400" />
+        <SummaryCard label="Total Credits" value={totalCreditsAll >= 1000000 ? (totalCreditsAll / 1000000).toFixed(2) + 'M' : totalCreditsAll.toLocaleString()} sub="Loaded lifetime" color="text-blue-400" />
         <SummaryCard label="Total Invoices" value={totalInvoicesAll} sub="All time" color="text-purple-400" />
-        <SummaryCard label="Active Vendors" value={vendors.length} sub="Current" color="text-amber-400" />
+        <SummaryCard label="Active Vendors" value={vendors.length} sub="With invoices" color="text-amber-400" />
       </div>
 
       {/* Leaderboard */}
@@ -275,15 +275,15 @@ function VendorLeaderboard({ vendors }) {
           </thead>
           <tbody>
             {vendors.map((v, i) => {
-              const pct = (v.totalSpent / vendors[0].totalSpent) * 100;
-              const avg = v.totalSpent / v.invoiceCount;
+              const pct = vendors[0].totalSpent > 0 ? (v.totalSpent / vendors[0].totalSpent) * 100 : 0;
+              const avg = v.invoiceCount > 0 ? v.totalSpent / v.invoiceCount : 0;
               const isTop3 = i < 3;
               return (
                 <tr key={v.slug} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition">
                   <td className="px-4 py-3">
                     {isTop3 ? (
                       <span className={`text-xs font-bold ${i === 0 ? 'text-yellow-400' : i === 1 ? 'text-gray-300' : 'text-amber-600'}`}>
-                        {i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉'}
+                        {i === 0 ? '\u{1F947}' : i === 1 ? '\u{1F948}' : '\u{1F949}'}
                       </span>
                     ) : (
                       <span className="text-xs text-gray-600">{i + 1}</span>
@@ -302,7 +302,7 @@ function VendorLeaderboard({ vendors }) {
                     ${Math.round(avg).toLocaleString()}
                   </td>
                   <td className="px-4 py-3 text-xs text-gray-500">
-                    {new Date(v.lastActive).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                    {v.lastActive ? new Date(v.lastActive).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '-'}
                   </td>
                   <td className="px-4 py-3">
                     <div className="w-full bg-gray-800 rounded-full h-1.5">
