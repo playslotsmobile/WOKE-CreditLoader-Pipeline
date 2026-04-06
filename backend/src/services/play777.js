@@ -123,18 +123,22 @@ async function fillDepositModal(page, credits, transactionType = 'deposit') {
 
 // Load credits to a vendor account via Vendors Overview page
 async function filterToVendor(page, username, operatorId) {
-  // Click the "All Vendors" multiselect filter
-  const vendorFilter = page.locator('.multiselect').first();
-  await vendorFilter.click();
-  await humanDelay(1000, 2000);
+  // Use JavaScript to select the vendor in the Vue multiselect and trigger table reload
+  await page.evaluate(({ username, operatorId }) => {
+    // Find the vendor filter Vue component
+    const multiselects = document.querySelectorAll('.multiselect');
+    const vendorFilter = multiselects[0]; // First multiselect is "All Vendors"
+    if (vendorFilter && vendorFilter.__vue__) {
+      const vm = vendorFilter.__vue__;
+      const option = vm.options.find(o => o.name && o.name.includes(username));
+      if (option) {
+        vm.select(option);
+      }
+    }
+  }, { username, operatorId });
+  await humanDelay(5000, 8000);
 
-  // Find and click the vendor option
-  const option = page.locator(`li:has-text("${username}")`).first();
-  await option.waitFor({ timeout: 10000 });
-  await option.click();
-  await humanDelay(3000, 5000);
-
-  // Wait for the filtered row to appear (use 'attached' state — elements may not be 'visible' on virtual display)
+  // Wait for the filtered row to appear
   const row = page.locator(`tr:has(a[onclick="return showAgentDrawer(${operatorId})"])`);
   await row.waitFor({ state: 'attached', timeout: 30000 });
   return row;
