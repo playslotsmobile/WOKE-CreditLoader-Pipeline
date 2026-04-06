@@ -9,8 +9,8 @@ const FEE_RATES = {
 };
 
 const METHOD_CONFIG = {
-  'Credit/Debit': { min: 250, max: 4500, step: 250 },
-  ACH: { min: 250, max: 9000, step: 250 },
+  'Credit/Debit': { min: 1000, max: 4500, step: 250 },
+  ACH: { min: 1000, max: 9000, step: 250 },
   Wire: { min: 1000, max: 20000 },
 };
 
