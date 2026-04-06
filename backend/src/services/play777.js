@@ -105,19 +105,25 @@ async function fillDepositModal(page, credits, transactionType = 'deposit') {
   await humanDelay(800, 1500);
 
   // Click submit button in the modal footer
-  // Button text changes based on transaction type: "Deposit" or "Correction"
   await humanMouseMove(page);
   const modal = page.locator('.modal.show').first();
-  const btnLabel = transactionType === 'correction' ? 'Correction' : 'Deposit';
-  const submitBtn = modal.locator(`.modal-footer button:has-text("${btnLabel}")`);
-  await submitBtn.click();
-  await humanDelay(1500, 3000);
 
-  // Confirm popup (text matches transaction type)
-  const confirmBtn = page.locator(`button:has-text("Confirm ${btnLabel}")`).first();
-  await confirmBtn.waitFor({ state: 'attached', timeout: 10000 });
-  await humanDelay(1000, 2000);
-  await confirmBtn.click();
+  if (transactionType === 'correction') {
+    // Correction modal: submit button says "Correct" and submits the form directly
+    const correctBtn = modal.locator('.modal-footer button:has-text("Correct")');
+    await correctBtn.click();
+    await humanDelay(1500, 3000);
+  } else {
+    // Deposit modal: "Deposit" button then "Confirm Deposit" popup
+    const depositBtn = modal.locator('.modal-footer button:has-text("Deposit")');
+    await depositBtn.click();
+    await humanDelay(1500, 3000);
+
+    const confirmBtn = page.locator('button:has-text("Confirm Deposit")').first();
+    await confirmBtn.waitFor({ state: 'attached', timeout: 10000 });
+    await humanDelay(1000, 2000);
+    await confirmBtn.click();
+  }
 
   // Wait for success
   try {
