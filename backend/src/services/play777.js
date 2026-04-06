@@ -75,17 +75,18 @@ async function fillDepositModal(page, credits, transactionType = 'deposit') {
     await humanDelay(800, 1500);
   }
 
-  // Select "Wire Transfer" from Payment Method dropdown
-  // Index shifts based on transaction type dropdown position
-  await humanMouseMove(page);
-  const paymentMethodSelect = form.locator('.multiselect').nth(1);
-  await paymentMethodSelect.click();
-  await humanDelay(500, 1000);
+  // Select "Wire Transfer" from Payment Method dropdown (not shown for corrections)
+  if (transactionType !== 'correction') {
+    await humanMouseMove(page);
+    const paymentMethodSelect = form.locator('.multiselect').nth(1);
+    await paymentMethodSelect.click();
+    await humanDelay(500, 1000);
 
-  const wireOption = form.locator('li[aria-label="Wire Transfer"]');
-  await wireOption.waitFor({ state: 'attached', timeout: 5000 });
-  await wireOption.click();
-  await humanDelay(800, 1500);
+    const wireOption = form.locator('li[aria-label="Wire Transfer"]');
+    await wireOption.waitFor({ state: 'attached', timeout: 5000 });
+    await wireOption.click();
+    await humanDelay(800, 1500);
+  }
 
   // Enter credits amount
   await humanMouseMove(page);
@@ -96,16 +97,17 @@ async function fillDepositModal(page, credits, transactionType = 'deposit') {
   await creditsInput.fill(String(credits));
   await humanDelay(800, 1500);
 
-  // Click "Deposit" in the modal footer to submit
-  // ("Add Deposit" just adds another row for batch deposits — don't click that)
+  // Click submit button in the modal footer
+  // Button text changes based on transaction type: "Deposit" or "Correction"
   await humanMouseMove(page);
   const modal = page.locator('.modal.show').first();
-  const depositBtn = modal.locator('.modal-footer button:has-text("Deposit")');
-  await depositBtn.click();
+  const btnLabel = transactionType === 'correction' ? 'Correction' : 'Deposit';
+  const submitBtn = modal.locator(`.modal-footer button:has-text("${btnLabel}")`);
+  await submitBtn.click();
   await humanDelay(1500, 3000);
 
-  // Confirm deposit popup
-  const confirmBtn = page.locator('button:has-text("Confirm Deposit")').first();
+  // Confirm popup (text matches transaction type)
+  const confirmBtn = page.locator(`button:has-text("Confirm ${btnLabel}")`).first();
   await confirmBtn.waitFor({ state: 'attached', timeout: 10000 });
   await humanDelay(1000, 2000);
   await confirmBtn.click();
