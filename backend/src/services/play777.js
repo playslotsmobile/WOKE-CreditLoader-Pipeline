@@ -230,31 +230,40 @@ async function loadOperator(page, vendor, operator, credits, transactionType = '
   console.log(`Play777: Successfully loaded ${credits} credits to operator ${operator.username}`);
 }
 
+const LOAD_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes max per load operation
+
 // Main entry point — loads credits to a single account
 // For operators, pass parentVendor with the vendor's info
 // transactionType: 'deposit' (default) or 'correction'
 async function loadCredits(account, credits, parentVendor, transactionType = 'deposit') {
-  let session, page;
+  let session;
 
-  try {
+  const doLoad = async () => {
     session = await getBrowserContext('play777');
     const context = session.context;
-    // Always use a fresh page to avoid stale state
-    page = await context.newPage();
+    const page = await context.newPage();
     await page.setViewportSize({ width: 1920, height: 1080 });
 
     const loggedIn = await ensureLoggedIn(page);
     if (!loggedIn) throw new Error('Failed to login to Play777');
 
     if (parentVendor) {
-      // This is an operator — load via vendor's operators drawer
       await loadOperator(page, parentVendor, account, credits, transactionType);
     } else {
-      // This is a vendor — load directly from Vendors Overview
       await loadVendor(page, account, credits, transactionType);
     }
 
     return { success: true, platform: 'PLAY777', account: account.username, credits };
+  };
+
+  try {
+    const result = await Promise.race([
+      doLoad(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Play777 load timed out after 3 minutes')), LOAD_TIMEOUT_MS)
+      ),
+    ]);
+    return result;
   } catch (err) {
     console.error('Play777 load error:', err.message);
     return { success: false, platform: 'PLAY777', account: account.username, error: err.message };

@@ -33,15 +33,16 @@ async function ensureLoggedIn(page) {
   }
 }
 
+const LOAD_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes max per load operation
+
 // Load credits to a shop account
 async function loadCredits(account, credits) {
-  let session, page;
+  let session;
 
-  try {
+  const doLoad = async () => {
     session = await getBrowserContext('iconnect');
     const context = session.context;
-    // Always use a fresh page to avoid stale state
-    page = await context.newPage();
+    const page = await context.newPage();
     await page.setViewportSize({ width: 1920, height: 1080 });
 
     const loggedIn = await ensureLoggedIn(page);
@@ -49,7 +50,6 @@ async function loadCredits(account, credits) {
 
     await humanDelay(2000, 4000);
 
-    // Ensure we're on the shops page
     if (!page.url().includes('/agent/show')) {
       await page.goto(SHOP_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
       await humanDelay(2000, 4000);
@@ -57,14 +57,12 @@ async function loadCredits(account, credits) {
 
     console.log(`IConnect: Loading ${credits} credits to ${account.username}`);
 
-    // Find the row with this username and extract the Deposit button's onclick params
     const depositBtn = page.locator(`button[onclick*="'${account.username}'"]`);
     const btnCount = await depositBtn.count();
     if (btnCount === 0) {
       throw new Error(`User "${account.username}" not found in IConnect table`);
     }
 
-    // Extract the agent ID and other params from the onclick attribute
     const onclick = await depositBtn.first().getAttribute('onclick');
     const match = onclick.match(/initDepositModal\(\s*'(\d+)',\s*'([^']+)',\s*'(\d+)',\s*'([^']+)'/);
     if (!match) {
@@ -74,21 +72,17 @@ async function loadCredits(account, credits) {
     const [, agentId, login, parentId, balance] = match;
     console.log(`IConnect: Agent ${login} (ID: ${agentId}), balance: ${balance}`);
 
-    // Open the deposit modal via JS and show it
     await humanMouseMove(page);
     await humanDelay(500, 1200);
     await page.evaluate(({ agentId, login, parentId, balance }) => {
       initDepositModal(agentId, login, parentId, balance);
-      // Trigger Bootstrap modal show in case initDepositModal doesn't do it
       $('#modal-deposite').modal('show');
     }, { agentId, login, parentId, balance });
     await humanDelay(1500, 3000);
 
-    // Wait for modal to be visible
     await page.waitForSelector('#modal-deposite.in, #modal-deposite.show', { state: 'visible', timeout: 10000 });
     await humanDelay(800, 1500);
 
-    // Enter amount — use evaluate to fill directly since click can timeout on modal overlays
     await humanDelay(500, 1000);
     await page.evaluate((credits) => {
       const input = document.getElementById('modal-deposite-amount');
@@ -98,7 +92,6 @@ async function loadCredits(account, credits) {
     }, String(credits));
     await humanDelay(800, 1500);
 
-    // Click Apply — form submits and page reloads
     await Promise.all([
       page.waitForURL('**/agent/show**', { timeout: 30000 }),
       page.evaluate(() => {
@@ -114,6 +107,16 @@ async function loadCredits(account, credits) {
     } else {
       throw new Error('Page did not return to /agent/show after deposit');
     }
+  };
+
+  try {
+    const result = await Promise.race([
+      doLoad(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('IConnect load timed out after 3 minutes')), LOAD_TIMEOUT_MS)
+      ),
+    ]);
+    return result;
   } catch (err) {
     console.error('IConnect load error:', err.message);
     return { success: false, platform: 'ICONNECT', account: account.username, error: err.message };

@@ -92,18 +92,22 @@ app.get('/api/qb-callback', async (req, res) => {
       return res.status(500).send('Token exchange failed: ' + JSON.stringify(data));
     }
 
-    // Save to .env
-    const fs = require('fs');
-    const envPath = require('path').join(__dirname, '..', '.env');
-    let env = fs.readFileSync(envPath, 'utf8');
-    env = env.replace(/QB_REFRESH_TOKEN=.*/, `QB_REFRESH_TOKEN=${data.refresh_token}`);
-    env = env.replace(/QB_REALM_ID=.*/, `QB_REALM_ID=${realmId}`);
-    fs.writeFileSync(envPath, env);
+    // Save to DB
     process.env.QB_REFRESH_TOKEN = data.refresh_token;
     process.env.QB_REALM_ID = realmId;
+    await prisma.setting.upsert({
+      where: { key: 'qb_refresh_token' },
+      update: { value: data.refresh_token },
+      create: { key: 'qb_refresh_token', value: data.refresh_token },
+    });
+    await prisma.setting.upsert({
+      where: { key: 'qb_realm_id' },
+      update: { value: realmId },
+      create: { key: 'qb_realm_id', value: realmId },
+    });
 
-    console.log('QB OAuth complete — refresh token and realm ID saved');
-    res.send('QuickBooks connected successfully! Refresh token and Realm ID saved. You can close this tab.');
+    console.log('QB OAuth complete — refresh token and realm ID saved to DB');
+    res.send('QuickBooks connected successfully! Tokens saved. You can close this tab.');
   } catch (err) {
     console.error('QB OAuth error:', err);
     res.status(500).send('OAuth failed: ' + err.message);
@@ -121,7 +125,25 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(publicPath, 'index.html'));
 });
 
+// Expire stale REQUESTED invoices older than 7 days
+async function expireStaleInvoices() {
+  try {
+    const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const expired = await prisma.invoice.updateMany({
+      where: { status: 'REQUESTED', submittedAt: { lt: cutoff } },
+      data: { status: 'FAILED' },
+    });
+    if (expired.count > 0) {
+      console.log(`Expired ${expired.count} stale REQUESTED invoices older than 7 days`);
+    }
+  } catch (err) {
+    console.error('Invoice expiry check failed:', err.message);
+  }
+}
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Backend running on http://localhost:${PORT}`);
+  expireStaleInvoices(); // Check on startup
+  setInterval(expireStaleInvoices, 60 * 60 * 1000); // Check every hour
 });

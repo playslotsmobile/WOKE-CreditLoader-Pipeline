@@ -1,11 +1,35 @@
-const fs = require('fs');
-const path = require('path');
+const prisma = require('../db/client');
 
-const envPath = path.join(__dirname, '..', '..', '.env');
 let accessToken = null;
 let tokenExpiry = 0;
 
+async function getRefreshToken() {
+  // Try DB first, fall back to .env
+  try {
+    const setting = await prisma.setting.findUnique({ where: { key: 'qb_refresh_token' } });
+    if (setting) return setting.value;
+  } catch {
+    // Table may not exist yet during migration
+  }
+  return process.env.QB_REFRESH_TOKEN;
+}
+
+async function saveRefreshToken(token) {
+  process.env.QB_REFRESH_TOKEN = token;
+  try {
+    await prisma.setting.upsert({
+      where: { key: 'qb_refresh_token' },
+      update: { value: token },
+      create: { key: 'qb_refresh_token', value: token },
+    });
+    console.log('QB refresh token saved to DB.');
+  } catch (err) {
+    console.error('Failed to save refresh token to DB:', err.message);
+  }
+}
+
 async function refreshAccessToken() {
+  const refreshToken = await getRefreshToken();
   const auth = Buffer.from(
     process.env.QB_CLIENT_ID + ':' + process.env.QB_CLIENT_SECRET
   ).toString('base64');
@@ -16,7 +40,7 @@ async function refreshAccessToken() {
       'Content-Type': 'application/x-www-form-urlencoded',
       Authorization: 'Basic ' + auth,
     },
-    body: 'grant_type=refresh_token&refresh_token=' + process.env.QB_REFRESH_TOKEN,
+    body: 'grant_type=refresh_token&refresh_token=' + refreshToken,
   });
 
   const data = await res.json();
@@ -27,17 +51,8 @@ async function refreshAccessToken() {
   accessToken = data.access_token;
   tokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
 
-  // Save new refresh token
   if (data.refresh_token) {
-    try {
-      let env = fs.readFileSync(envPath, 'utf8');
-      env = env.replace(/QB_REFRESH_TOKEN=.*/, `QB_REFRESH_TOKEN=${data.refresh_token}`);
-      fs.writeFileSync(envPath, env);
-      process.env.QB_REFRESH_TOKEN = data.refresh_token;
-      console.log('QB refresh token saved.');
-    } catch (err) {
-      console.error('Failed to save refresh token:', err.message);
-    }
+    await saveRefreshToken(data.refresh_token);
   }
 
   return accessToken;
