@@ -23,7 +23,7 @@ async function run() {
 
   // 1. Backend API
   await check('Backend API', async () => {
-    const res = await fetch('http://localhost:3000/api/admin/invoices');
+    const res = await fetch('http://localhost:3000/api/vendors/mike');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
   });
 
@@ -73,7 +73,7 @@ async function run() {
 
   // 7. SSL / External access
   await check('External HTTPS', async () => {
-    const res = await fetch('https://load.wokeavr.com/api/admin/invoices', {
+    const res = await fetch('https://load.wokeavr.com/api/vendors/mike', {
       signal: AbortSignal.timeout(15000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
