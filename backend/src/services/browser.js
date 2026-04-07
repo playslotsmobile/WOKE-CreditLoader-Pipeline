@@ -37,12 +37,32 @@ async function humanMouseMove(page) {
   await page.mouse.move(x, y, { steps: 5 + Math.floor(Math.random() * 10) });
 }
 
+// Rate limiter — track launches per platform
+const launchHistory = {};
+const MAX_LAUNCHES = 3;
+const WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+
+function checkRateLimit(platform) {
+  const now = Date.now();
+  if (!launchHistory[platform]) launchHistory[platform] = [];
+  // Remove entries older than window
+  launchHistory[platform] = launchHistory[platform].filter((t) => now - t < WINDOW_MS);
+  if (launchHistory[platform].length >= MAX_LAUNCHES) {
+    const oldestInWindow = launchHistory[platform][0];
+    const waitSec = Math.ceil((WINDOW_MS - (now - oldestInWindow)) / 1000);
+    throw new Error(`Rate limit: ${MAX_LAUNCHES} browser launches in ${WINDOW_MS / 60000}min window. Wait ${waitSec}s before retrying.`);
+  }
+  launchHistory[platform].push(now);
+}
+
 // Launch an AdsPower profile and connect Playwright to it
 async function getBrowserContext(platform) {
   const profileId = PROFILE_IDS[platform];
   if (!profileId) {
     throw new Error(`No AdsPower profile ID configured for platform: ${platform}. Set ADSPOWER_${platform.toUpperCase()}_ID in .env`);
   }
+
+  checkRateLimit(platform);
 
   // Start the AdsPower browser profile with memory-saving flags
   const launchArgs = encodeURIComponent(JSON.stringify([
