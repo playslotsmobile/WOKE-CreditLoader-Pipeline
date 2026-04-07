@@ -69,19 +69,39 @@ async function processInvoice(invoiceId, retryCount = 0) {
       throw new Error('No source vendor account found for correction');
     }
 
+    // Step 1: Correct (deduct) total credits from source account
+    const totalCorrectionCredits = pendingJobs.reduce((s, j) => s + j.creditsAmount, 0);
+    console.log(`Correction Step 1: Deducting ${totalCorrectionCredits} credits from ${source.username} (${source.operatorId})`);
+
+    let deductResult;
+    if (DRY_RUN) {
+      console.log(`[DRY RUN] Would correct ${totalCorrectionCredits} credits from ${source.username}`);
+      deductResult = { success: true };
+    } else {
+      deductResult = await play777.loadCredits(
+        { username: source.username, operatorId: source.operatorId },
+        totalCorrectionCredits,
+        null,
+        'correction'
+      );
+    }
+
+    if (!deductResult.success) {
+      console.error(`Correction failed: Could not deduct from ${source.username}: ${deductResult.error}`);
+      await markAllJobsFailed(pendingJobs, `Failed to deduct from ${source.username}: ${deductResult.error}`);
+      await prisma.invoice.update({ where: { id: invoiceId }, data: { status: 'FAILED' } });
+      return { invoiceId, results: [deductResult], allSuccess: false };
+    }
+
+    console.log(`Correction Step 1 complete: ${totalCorrectionCredits} credits deducted from ${source.username}`);
+    await new Promise((r) => setTimeout(r, 3000 + Math.random() * 5000));
+
+    // Step 2: Deposit credits to each target vendor
     for (const job of pendingJobs) {
       const account = job.vendorAccount;
-      console.log(`Correction: ${job.creditsAmount} credits from ${source.username} to ${account.username}`);
+      console.log(`Correction Step 2: Depositing ${job.creditsAmount} credits to ${account.username} (${account.operatorId})`);
 
-      let parentVendor = null;
-      if (account.loadType === 'operator' && account.parentVendorAccId) {
-        const parentAcc = vendor.accounts.find((a) => a.id === account.parentVendorAccId);
-        if (parentAcc) {
-          parentVendor = { username: parentAcc.username, operatorId: parentAcc.operatorId };
-        }
-      }
-
-      const result = await executeLoad(job, 'PLAY777', account, job.creditsAmount, parentVendor);
+      const result = await executeLoad(job, 'PLAY777', account, job.creditsAmount);
       results.push(result);
 
       if (pendingJobs.length > 1) {
