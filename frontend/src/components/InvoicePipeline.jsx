@@ -27,7 +27,7 @@ const DOT_STYLES = {
   red: 'bg-red-400',
 };
 
-export default function InvoicePipeline({ invoices, statuses, onConfirmWire, onTriggerLoad }) {
+export default function InvoicePipeline({ invoices, statuses, onConfirmWire, onTriggerLoad, onResendEmail }) {
   return (
     <div className="flex gap-4 overflow-x-auto pb-4" style={{ minHeight: 'calc(100vh - 140px)' }}>
       {statuses.map((status) => {
@@ -66,6 +66,7 @@ export default function InvoicePipeline({ invoices, statuses, onConfirmWire, onT
                       allocations={item.allocations}
                       onConfirmWire={onConfirmWire}
                       onTriggerLoad={onTriggerLoad}
+                      onResendEmail={onResendEmail}
                     />
                   ))
                 )}

@@ -144,7 +144,44 @@ async function createInvoice(vendor, invoice, allocations) {
   }
 
   const result = await qbRequest('POST', 'invoice', invoiceData);
-  return result.Invoice;
+  const createdInvoice = result.Invoice;
+
+  // Explicitly send the invoice email
+  try {
+    await sendInvoiceEmail(createdInvoice.Id, vendor.email);
+    console.log(`QB: Invoice ${createdInvoice.Id} email sent to ${vendor.email}`);
+  } catch (err) {
+    console.error(`QB: Failed to send invoice email for ${createdInvoice.Id}:`, err.message);
+  }
+
+  return createdInvoice;
+}
+
+async function sendInvoiceEmail(invoiceId, email) {
+  const token = await getAccessToken();
+  const realmId = process.env.QB_REALM_ID;
+  const baseUrl =
+    process.env.QB_ENVIRONMENT === 'production'
+      ? 'https://quickbooks.api.intuit.com'
+      : 'https://sandbox-quickbooks.api.intuit.com';
+
+  const url = `${baseUrl}/v3/company/${realmId}/invoice/${invoiceId}/send?sendTo=${encodeURIComponent(email)}`;
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/octet-stream',
+      Accept: 'application/json',
+    },
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`QB send invoice failed: ${res.status} - ${text}`);
+  }
+
+  return res.json();
 }
 
 async function getInvoice(invoiceId) {
@@ -160,6 +197,7 @@ async function getPayment(paymentId) {
 module.exports = {
   findCustomer,
   createInvoice,
+  sendInvoiceEmail,
   getInvoice,
   getPayment,
 };

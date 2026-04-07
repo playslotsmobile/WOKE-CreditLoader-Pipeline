@@ -13,10 +13,12 @@ function timeAgo(dateStr) {
   return `${days}d`;
 }
 
-export default function InvoiceCard({ invoice, allocations, onConfirmWire, onTriggerLoad }) {
+export default function InvoiceCard({ invoice, allocations, onConfirmWire, onTriggerLoad, onResendEmail }) {
   const isPending = invoice.status === 'PENDING';
   const isFailed = invoice.status === 'FAILED';
   const isPaid = invoice.status === 'PAID';
+  const isRequested = invoice.status === 'REQUESTED';
+  const canResend = (isRequested || isPending) && invoice.qbInvoiceId;
 
   return (
     <div className="bg-[#1c1f2e] rounded-lg border border-gray-800 hover:border-gray-700 transition p-3 group">
@@ -77,6 +79,15 @@ export default function InvoiceCard({ invoice, allocations, onConfirmWire, onTri
           className="mt-3 w-full text-xs font-semibold py-2 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 hover:bg-blue-500/20 transition"
         >
           Trigger Load
+        </button>
+      )}
+
+      {canResend && (
+        <button
+          onClick={() => onResendEmail(invoice.id)}
+          className="mt-2 w-full text-xs font-semibold py-2 rounded-lg bg-gray-500/10 border border-gray-500/30 text-gray-400 hover:bg-gray-500/20 transition"
+        >
+          Resend Email
         </button>
       )}
     </div>

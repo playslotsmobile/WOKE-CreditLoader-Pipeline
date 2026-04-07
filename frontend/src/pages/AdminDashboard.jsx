@@ -55,6 +55,15 @@ export default function AdminDashboard() {
     }
   }
 
+  async function handleResendEmail(invoiceId) {
+    try {
+      const res = await axios.post(`/api/admin/invoices/${invoiceId}/resend-email`);
+      alert(res.data.message);
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to resend email');
+    }
+  }
+
   const counts = {};
   STATUSES.forEach((s) => {
     counts[s] = invoices.filter((i) => i.invoice.status === s).length;
@@ -138,6 +147,7 @@ export default function AdminDashboard() {
             statuses={STATUSES}
             onConfirmWire={handleConfirmWire}
             onTriggerLoad={handleTriggerLoad}
+            onResendEmail={handleResendEmail}
           />
         ) : view === 'vendors' ? (
           <VendorLeaderboard vendors={vendorStats} />
@@ -146,6 +156,7 @@ export default function AdminDashboard() {
             invoices={invoices}
             onConfirmWire={handleConfirmWire}
             onTriggerLoad={handleTriggerLoad}
+            onResendEmail={handleResendEmail}
           />
         )}
       </main>
@@ -162,7 +173,7 @@ function Stat({ label, value, color }) {
   );
 }
 
-function ListView({ invoices, onConfirmWire, onTriggerLoad }) {
+function ListView({ invoices, onConfirmWire, onTriggerLoad, onResendEmail }) {
   if (invoices.length === 0) {
     return <p className="text-gray-500 text-center py-12">No invoices yet.</p>;
   }
@@ -210,21 +221,28 @@ function ListView({ invoices, onConfirmWire, onTriggerLoad }) {
                 {new Date(invoice.submittedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </td>
               <td className="px-4 py-3">
-                {invoice.status === 'PENDING' && (
-                  <button onClick={() => onConfirmWire(invoice.id)} className="text-xs px-2 py-1 bg-amber-600/20 text-amber-400 hover:bg-amber-600/30 rounded transition">
-                    Confirm Wire
-                  </button>
-                )}
-                {invoice.status === 'PAID' && (
-                  <button onClick={() => onTriggerLoad(invoice.id)} className="text-xs px-2 py-1 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 rounded transition">
-                    Load
-                  </button>
-                )}
-                {invoice.status === 'FAILED' && (
-                  <button onClick={() => onTriggerLoad(invoice.id)} className="text-xs px-2 py-1 bg-red-600/20 text-red-400 hover:bg-red-600/30 rounded transition">
-                    Retry
-                  </button>
-                )}
+                <div className="flex gap-1.5">
+                  {invoice.status === 'PENDING' && (
+                    <button onClick={() => onConfirmWire(invoice.id)} className="text-xs px-2 py-1 bg-amber-600/20 text-amber-400 hover:bg-amber-600/30 rounded transition">
+                      Confirm Wire
+                    </button>
+                  )}
+                  {invoice.status === 'PAID' && (
+                    <button onClick={() => onTriggerLoad(invoice.id)} className="text-xs px-2 py-1 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 rounded transition">
+                      Load
+                    </button>
+                  )}
+                  {invoice.status === 'FAILED' && (
+                    <button onClick={() => onTriggerLoad(invoice.id)} className="text-xs px-2 py-1 bg-red-600/20 text-red-400 hover:bg-red-600/30 rounded transition">
+                      Retry
+                    </button>
+                  )}
+                  {(invoice.status === 'REQUESTED' || invoice.status === 'PENDING') && invoice.qbInvoiceId && (
+                    <button onClick={() => onResendEmail(invoice.id)} className="text-xs px-2 py-1 bg-gray-600/20 text-gray-400 hover:bg-gray-600/30 rounded transition">
+                      Resend
+                    </button>
+                  )}
+                </div>
               </td>
             </tr>
           ))}

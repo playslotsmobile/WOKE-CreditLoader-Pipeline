@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const telegram = require('../services/telegram');
+const quickbooks = require('../services/quickbooks');
 const prisma = require('../db/client');
 const autoloader = require('../services/autoloader');
 
@@ -104,6 +105,26 @@ router.post('/invoices/:id/trigger-load', async (req, res) => {
   } catch (err) {
     console.error('Trigger load error:', err);
     res.status(500).json({ error: 'Failed to trigger load' });
+  }
+});
+
+// Resend QB invoice email
+router.post('/invoices/:id/resend-email', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const invoice = await prisma.invoice.findUnique({
+      where: { id },
+      include: { vendor: true },
+    });
+
+    if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+    if (!invoice.qbInvoiceId) return res.status(400).json({ error: 'No QB invoice ID — cannot resend' });
+
+    await quickbooks.sendInvoiceEmail(invoice.qbInvoiceId, invoice.vendor.email);
+    res.json({ success: true, message: `Invoice email resent to ${invoice.vendor.email}` });
+  } catch (err) {
+    console.error('Resend email error:', err);
+    res.status(500).json({ error: 'Failed to resend invoice email' });
   }
 });
 
