@@ -81,7 +81,7 @@ async function processInvoice(invoiceId, retryCount = 0) {
         }
       }
 
-      const result = await executeLoad(job, 'PLAY777', account, job.creditsAmount, parentVendor, 'correction');
+      const result = await executeLoad(job, 'PLAY777', account, job.creditsAmount, parentVendor);
       results.push(result);
 
       if (pendingJobs.length > 1) {
