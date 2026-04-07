@@ -15,6 +15,7 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState('pipeline');
   const [vendorStats, setVendorStats] = useState([]);
+  const [corrections, setCorrections] = useState([]);
   const navigate = useNavigate();
 
   function handleAuthError(err) {
@@ -46,6 +47,15 @@ export default function AdminDashboard() {
     }
   }, []);
 
+  const fetchCorrections = useCallback(async () => {
+    try {
+      const res = await axios.get('/api/admin/corrections', { headers: getAuthHeaders() });
+      setCorrections(res.data);
+    } catch (err) {
+      handleAuthError(err);
+    }
+  }, []);
+
   useEffect(() => {
     if (!localStorage.getItem('admin_token')) {
       navigate('/admin/login');
@@ -53,9 +63,10 @@ export default function AdminDashboard() {
     }
     fetchInvoices();
     fetchVendorStats();
+    fetchCorrections();
     const interval = setInterval(fetchInvoices, 5000);
     return () => clearInterval(interval);
-  }, [fetchInvoices, fetchVendorStats]);
+  }, [fetchInvoices, fetchVendorStats, fetchCorrections]);
 
   async function handleConfirmWire(invoiceId) {
     try {
@@ -164,6 +175,12 @@ export default function AdminDashboard() {
               >
                 Vendors
               </button>
+              <button
+                onClick={() => setView('corrections')}
+                className={`px-3 py-1 text-xs rounded-md transition ${view === 'corrections' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-300'}`}
+              >
+                Corrections
+              </button>
             </div>
           </div>
         </div>
@@ -178,6 +195,8 @@ export default function AdminDashboard() {
             onTriggerLoad={handleTriggerLoad}
             onResendEmail={handleResendEmail}
           />
+        ) : view === 'corrections' ? (
+          <CorrectionLog corrections={corrections} />
         ) : view === 'vendors' ? (
           <VendorLeaderboard vendors={vendorStats} />
         ) : (
@@ -375,6 +394,59 @@ function SummaryCard({ label, value, sub, color }) {
       <p className="text-xs text-gray-500 mb-1">{label}</p>
       <p className={`text-2xl font-bold ${color}`}>{value}</p>
       <p className="text-[10px] text-gray-600 mt-1">{sub}</p>
+    </div>
+  );
+}
+
+function CorrectionLog({ corrections }) {
+  if (corrections.length === 0) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <p className="text-gray-500">No corrections yet.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-[#161922] rounded-xl border border-gray-800 overflow-x-auto">
+      <table className="w-full text-sm min-w-[500px]">
+        <thead>
+          <tr className="border-b border-gray-800 text-left text-xs text-gray-500 uppercase tracking-wider">
+            <th className="px-4 py-3">#</th>
+            <th className="px-4 py-3">Vendor</th>
+            <th className="px-4 py-3">Accounts</th>
+            <th className="px-4 py-3 text-right">Total Credits</th>
+            <th className="px-4 py-3">Status</th>
+            <th className="px-4 py-3">Time</th>
+          </tr>
+        </thead>
+        <tbody>
+          {corrections.map((c) => {
+            const totalCredits = c.allocations.reduce((s, a) => s + a.credits, 0);
+            return (
+              <tr key={c.id} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition">
+                <td className="px-4 py-3 text-gray-500 font-mono text-xs">#{c.id}</td>
+                <td className="px-4 py-3 font-medium text-gray-200 capitalize">{c.vendorSlug}</td>
+                <td className="px-4 py-3">
+                  <div className="flex flex-wrap gap-1">
+                    {c.allocations.map((a, i) => (
+                      <span key={i} className="text-xs bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded">
+                        {a.username}: {a.credits.toLocaleString()}
+                      </span>
+                    ))}
+                  </div>
+                </td>
+                <td className="px-4 py-3 text-right font-mono text-gray-200">{totalCredits.toLocaleString()}</td>
+                <td className="px-4 py-3"><StatusBadge status={c.status} /></td>
+                <td className="px-4 py-3 text-xs text-gray-500">
+                  {new Date(c.submittedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}{' '}
+                  {new Date(c.submittedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }

@@ -159,6 +159,40 @@ router.post('/invoices/:id/resend-email', async (req, res) => {
   }
 });
 
+// Recent corrections
+router.get('/corrections', async (req, res) => {
+  try {
+    const corrections = await prisma.invoice.findMany({
+      where: { method: 'Correction' },
+      include: {
+        vendor: true,
+        allocations: { include: { vendorAccount: true } },
+      },
+      orderBy: { submittedAt: 'desc' },
+      take: 50,
+    });
+
+    const formatted = corrections.map((c) => ({
+      id: c.id,
+      vendor: c.vendor.name,
+      vendorSlug: c.vendor.slug,
+      status: c.status,
+      submittedAt: c.submittedAt,
+      loadedAt: c.loadedAt,
+      allocations: c.allocations.map((a) => ({
+        username: a.vendorAccount.username,
+        operatorId: a.vendorAccount.operatorId,
+        credits: a.credits,
+      })),
+    }));
+
+    res.json(formatted);
+  } catch (err) {
+    console.error('Corrections error:', err);
+    res.status(500).json({ error: 'Failed to fetch corrections' });
+  }
+});
+
 // Vendor stats (real data from DB)
 router.get('/vendor-stats', async (req, res) => {
   try {
