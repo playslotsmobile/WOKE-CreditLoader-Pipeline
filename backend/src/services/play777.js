@@ -144,9 +144,25 @@ async function loadVendor(page, account, credits, transactionType = 'deposit') {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await humanDelay(5000, 8000);
 
-  // Find the vendor row by agent ID
-  const row = page.locator(`tr:has(a[onclick="return showAgentDrawer(${account.operatorId})"])`);
-  await row.waitFor({ state: 'attached', timeout: 120000 });
+  // Wait for table to be populated
+  await page.locator('table tbody tr').first().waitFor({ state: 'attached', timeout: 60000 });
+  await humanDelay(3000, 5000);
+
+  // Find the vendor row by agent ID using evaluate (CSS :has() doesn't work in CDP)
+  const rowIndex = await page.evaluate((opId) => {
+    const rows = document.querySelectorAll('table tbody tr');
+    for (let i = 0; i < rows.length; i++) {
+      const link = rows[i].querySelector(`a[onclick="return showAgentDrawer(${opId})"]`);
+      if (link) return i;
+    }
+    return -1;
+  }, account.operatorId);
+
+  if (rowIndex === -1) {
+    throw new Error(`Vendor ${account.username} (${account.operatorId}) not found on vendors page`);
+  }
+
+  const row = page.locator('table tbody tr').nth(rowIndex);
   await row.scrollIntoViewIfNeeded();
   await humanDelay(500, 1000);
 
@@ -168,9 +184,25 @@ async function loadOperator(page, vendor, operator, credits, transactionType = '
   await page.setViewportSize({ width: 1920, height: 1080 });
   await humanDelay(5000, 8000);
 
-  // Find the vendor row
-  const vendorRow = page.locator(`tr:has(a[onclick="return showAgentDrawer(${vendor.operatorId})"])`);
-  await vendorRow.waitFor({ state: 'attached', timeout: 120000 });
+  // Wait for table to be populated
+  await page.locator('table tbody tr').first().waitFor({ state: 'attached', timeout: 60000 });
+  await humanDelay(3000, 5000);
+
+  // Find the vendor row using evaluate
+  const vendorRowIndex = await page.evaluate((opId) => {
+    const rows = document.querySelectorAll('table tbody tr');
+    for (let i = 0; i < rows.length; i++) {
+      const link = rows[i].querySelector(`a[onclick="return showAgentDrawer(${opId})"]`);
+      if (link) return i;
+    }
+    return -1;
+  }, vendor.operatorId);
+
+  if (vendorRowIndex === -1) {
+    throw new Error(`Vendor ${vendor.username} (${vendor.operatorId}) not found on vendors page`);
+  }
+
+  const vendorRow = page.locator('table tbody tr').nth(vendorRowIndex);
   await vendorRow.scrollIntoViewIfNeeded();
   await humanDelay(500, 1000);
 
