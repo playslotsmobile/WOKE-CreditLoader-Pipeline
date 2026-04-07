@@ -1,12 +1,26 @@
 const express = require('express');
 const router = express.Router();
+const path = require('path');
+const fs = require('fs');
 const multer = require('multer');
 const quickbooks = require('../services/quickbooks');
 const telegram = require('../services/telegram');
 const autoloader = require('../services/autoloader');
 const prisma = require('../db/client');
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+const uploadsDir = path.join(__dirname, '..', '..', 'uploads');
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: uploadsDir,
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname);
+      cb(null, `wire-${Date.now()}${ext}`);
+    },
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
 
 router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) => {
   try {
@@ -76,6 +90,11 @@ router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) =>
       feeAmount,
       totalAmount,
     };
+
+    // Save wire receipt path if uploaded
+    if (req.file) {
+      console.log(`Wire receipt saved: ${req.file.filename}`);
+    }
 
     if (isWire) {
       try {

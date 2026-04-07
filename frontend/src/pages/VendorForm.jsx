@@ -47,6 +47,9 @@ export default function VendorForm() {
   const [baseAmount, setBaseAmount] = useState('');
   const [allocations, setAllocations] = useState({});
 
+  // Wire receipt state
+  const [wireReceipt, setWireReceipt] = useState(null);
+
   // Corrections form state
   const [corrections, setCorrections] = useState({});
   const [correctionSubmitted, setCorrectionSubmitted] = useState(false);
@@ -160,7 +163,14 @@ export default function VendorForm() {
         allocations: accountAllocations,
       };
 
-      await axios.post('/api/submit-invoice', payload);
+      if (isWire && wireReceipt) {
+        const formData = new FormData();
+        formData.append('data', JSON.stringify(payload));
+        formData.append('wireReceipt', wireReceipt);
+        await axios.post('/api/submit-invoice', formData);
+      } else {
+        await axios.post('/api/submit-invoice', payload);
+      }
       setSubmitted(true);
     } catch (err) {
       alert(
@@ -481,6 +491,7 @@ export default function VendorForm() {
                     <input
                       type="file"
                       accept="image/*,.pdf"
+                      onChange={(e) => setWireReceipt(e.target.files[0] || null)}
                       className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm file:mr-4 file:py-1 file:px-3 file:rounded file:border-0 file:bg-gray-100 file:text-gray-700 file:cursor-pointer"
                     />
                     <HelpText>

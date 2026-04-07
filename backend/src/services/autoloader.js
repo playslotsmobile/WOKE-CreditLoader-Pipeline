@@ -4,9 +4,11 @@ const telegram = require('./telegram');
 const prisma = require('../db/client');
 
 const DRY_RUN = process.env.DRY_RUN === 'true';
+const MAX_RETRIES = 3;
+const RETRY_DELAYS = [30000, 60000, 120000]; // 30s, 60s, 2min
 
 // Process all load jobs for an invoice
-async function processInvoice(invoiceId) {
+async function processInvoice(invoiceId, retryCount = 0) {
   const invoice = await prisma.invoice.findUnique({
     where: { id: invoiceId },
     include: {
@@ -221,12 +223,39 @@ async function processInvoice(invoiceId) {
     console.log(`Invoice ${invoiceId}: All loads completed successfully`);
   } else {
     const failed = results.filter((r) => !r.success);
-    await prisma.invoice.update({
-      where: { id: invoiceId },
-      data: { status: 'FAILED' },
-    });
+    const attempt = retryCount + 1;
 
-    console.error(`Invoice ${invoiceId}: ${failed.length} loads failed`);
+    if (attempt < MAX_RETRIES) {
+      const delayMs = RETRY_DELAYS[retryCount];
+      console.error(`Invoice ${invoiceId}: ${failed.length} loads failed — retrying in ${delayMs / 1000}s (attempt ${attempt}/${MAX_RETRIES})`);
+
+      await prisma.invoice.update({
+        where: { id: invoiceId },
+        data: { status: 'PAID' },
+      });
+
+      setTimeout(() => {
+        processInvoice(invoiceId, attempt).catch((err) => {
+          console.error(`Invoice ${invoiceId}: Auto-retry ${attempt} failed:`, err.message);
+        });
+      }, delayMs);
+    } else {
+      await prisma.invoice.update({
+        where: { id: invoiceId },
+        data: { status: 'FAILED' },
+      });
+
+      console.error(`Invoice ${invoiceId}: ${failed.length} loads failed after ${MAX_RETRIES} attempts`);
+
+      try {
+        await telegram.bot.sendMessage(
+          process.env.TELEGRAM_ADMIN_CHAT_ID,
+          `🚨 LOAD FAILED (${MAX_RETRIES} attempts) 🚨\n\nInvoice #${invoiceId}\nVendor: ${invoice.vendor.name}\n\nUse the admin dashboard to retry manually.`
+        );
+      } catch (err) {
+        console.error('Telegram failure alert failed:', err.message);
+      }
+    }
   }
 
   return { invoiceId, results, allSuccess };
