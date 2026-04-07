@@ -29,15 +29,28 @@ async function processInvoice(invoiceId, retryCount = 0) {
     data: { status: 'LOADING' },
   });
 
+  // Create or fetch LoadJob records for each allocation
+  await ensureLoadJobs(invoice);
+
+  // Get only PENDING load jobs (skip already SUCCESS ones on retry)
+  const pendingJobs = await prisma.loadJob.findMany({
+    where: { invoiceId, status: 'PENDING' },
+    include: { vendorAccount: true },
+  });
+
+  if (pendingJobs.length === 0) {
+    // All jobs already succeeded (edge case)
+    await prisma.invoice.update({
+      where: { id: invoiceId },
+      data: { status: 'LOADED', loadedAt: new Date() },
+    });
+    console.log(`Invoice ${invoiceId}: All loads already completed`);
+    return { invoiceId, results: [], allSuccess: true };
+  }
+
   const results = [];
 
   if (isCorrection) {
-    // For corrections, find the source account (the vendor's main Play777 account)
-    const sourceAccount = invoice.vendor.accounts
-      ? null // We need to fetch it
-      : null;
-
-    // Fetch vendor with accounts to find the source
     const vendor = await prisma.vendor.findUnique({
       where: { id: invoice.vendorId },
       include: { accounts: true },
@@ -48,6 +61,7 @@ async function processInvoice(invoiceId, retryCount = 0) {
     );
 
     if (!source) {
+      await markAllJobsFailed(pendingJobs, 'No source vendor account found');
       await prisma.invoice.update({
         where: { id: invoiceId },
         data: { status: 'FAILED' },
@@ -55,17 +69,10 @@ async function processInvoice(invoiceId, retryCount = 0) {
       throw new Error('No source vendor account found for correction');
     }
 
-    // TODO: Check source account balance on Play777 before processing
-    // If insufficient, send Telegram alert and abort
+    for (const job of pendingJobs) {
+      const account = job.vendorAccount;
+      console.log(`Correction: ${job.creditsAmount} credits from ${source.username} to ${account.username}`);
 
-    // Process each correction as a "Correction" transaction type
-    for (const alloc of invoice.allocations) {
-      if (alloc.credits <= 0) continue;
-      const account = alloc.vendorAccount;
-      console.log(`Correction: ${alloc.credits} credits from ${source.username} to ${account.username}`);
-
-      // Load via Play777 with correction transaction type
-      // For operator accounts, pass the parent vendor so loadOperator is used
       let parentVendor = null;
       if (account.loadType === 'operator' && account.parentVendorAccId) {
         const parentAcc = vendor.accounts.find((a) => a.id === account.parentVendorAccId);
@@ -74,110 +81,74 @@ async function processInvoice(invoiceId, retryCount = 0) {
         }
       }
 
-      let result;
-      if (DRY_RUN) {
-        console.log(`[DRY RUN] Would load correction: ${alloc.credits} credits to ${account.username} (${account.operatorId}) on Play777`);
-        result = { success: true, platform: 'PLAY777', account: account.username, credits: alloc.credits, dryRun: true };
-      } else {
-        result = await play777.loadCredits(
-          { username: account.username, operatorId: account.operatorId },
-          alloc.credits,
-          parentVendor,
-          'correction'
-        );
-      }
+      const result = await executeLoad(job, 'PLAY777', account, job.creditsAmount, parentVendor, 'correction');
       results.push(result);
 
-      if (invoice.allocations.length > 1) {
+      if (pendingJobs.length > 1) {
         await new Promise((r) => setTimeout(r, 3000 + Math.random() * 5000));
       }
     }
   } else {
-    // Regular invoice — group by platform and process
+    // Regular invoice — split by platform
+    const play777Jobs = pendingJobs.filter((j) => j.vendorAccount.platform === 'PLAY777');
+    const iconnectJobs = pendingJobs.filter((j) => j.vendorAccount.platform === 'ICONNECT');
 
-    // Play777 accounts (vendors and chain loads)
-    const play777Allocs = invoice.allocations.filter(
-      (a) => a.vendorAccount.platform === 'PLAY777' && Number(a.dollarAmount) > 0
-    );
+    // Process Play777
+    for (const job of play777Jobs) {
+      const account = job.vendorAccount;
+      console.log(`Loading Play777: ${account.username} (${account.operatorId}) — ${job.creditsAmount} credits`);
 
-    // IConnect accounts
-    const iconnectAllocs = invoice.allocations.filter(
-      (a) => a.vendorAccount.platform === 'ICONNECT' && Number(a.dollarAmount) > 0
-    );
-
-    // Process Play777 — vendors first, then handle chain loads
-    for (const alloc of play777Allocs) {
-      const account = alloc.vendorAccount;
-      console.log(`Loading Play777: ${account.username} (${account.operatorId}) — ${alloc.credits} credits`);
-
-      let result;
-      if (DRY_RUN) {
-        console.log(`[DRY RUN] Would load Play777: ${alloc.credits} credits to ${account.username} (${account.operatorId})`);
-        result = { success: true, platform: 'PLAY777', account: account.username, credits: alloc.credits, dryRun: true };
-      } else {
-        result = await play777.loadCredits(
-          {
-            username: account.username,
-            operatorId: account.operatorId,
-          },
-          alloc.credits
-        );
-      }
+      const result = await executeLoad(job, 'PLAY777', account, job.creditsAmount);
       results.push(result);
 
-      // If this account has a chain target (vendor → operator), load the operator too
+      // Handle chain loads
       if (account.chainToAccId && result.success) {
         const chainTarget = await prisma.vendorAccount.findUnique({
           where: { id: account.chainToAccId },
         });
 
         if (chainTarget) {
-          console.log(`Chain load: ${alloc.credits} credits to operator ${chainTarget.username} (${chainTarget.operatorId})`);
+          // Find or create chain load job
+          let chainJob = await prisma.loadJob.findFirst({
+            where: { invoiceId, vendorAccountId: chainTarget.id, status: 'PENDING' },
+          });
 
-          // Small delay between chain loads
+          if (!chainJob) {
+            chainJob = await prisma.loadJob.create({
+              data: {
+                invoiceId,
+                vendorAccountId: chainTarget.id,
+                creditsAmount: job.creditsAmount,
+                status: 'PENDING',
+              },
+            });
+          }
+
+          console.log(`Chain load: ${job.creditsAmount} credits to operator ${chainTarget.username} (${chainTarget.operatorId})`);
           await new Promise((r) => setTimeout(r, 3000 + Math.random() * 5000));
 
-          let chainResult;
-          if (DRY_RUN) {
-            console.log(`[DRY RUN] Would chain-load Play777: ${alloc.credits} credits to operator ${chainTarget.username} (${chainTarget.operatorId}) under vendor ${account.username}`);
-            chainResult = { success: true, platform: 'PLAY777', account: chainTarget.username, credits: alloc.credits, dryRun: true };
-          } else {
-            chainResult = await play777.loadCredits(
-              {
-                username: chainTarget.username,
-                operatorId: chainTarget.operatorId,
-              },
-              alloc.credits,
-              { username: account.username, operatorId: account.operatorId }
-            );
-          }
+          const chainResult = await executeLoad(
+            chainJob, 'PLAY777', chainTarget, job.creditsAmount,
+            { username: account.username, operatorId: account.operatorId }
+          );
           results.push(chainResult);
         }
       }
 
-      if (play777Allocs.length > 1) {
+      if (play777Jobs.length > 1) {
         await new Promise((r) => setTimeout(r, 3000 + Math.random() * 5000));
       }
     }
 
-    // Process IConnect accounts
-    for (const alloc of iconnectAllocs) {
-      const account = alloc.vendorAccount;
-      console.log(`Loading IConnect: ${account.username} — ${alloc.credits} credits`);
+    // Process IConnect
+    for (const job of iconnectJobs) {
+      const account = job.vendorAccount;
+      console.log(`Loading IConnect: ${account.username} — ${job.creditsAmount} credits`);
 
-      let result;
-      if (DRY_RUN) {
-        console.log(`[DRY RUN] Would load IConnect: ${alloc.credits} credits to ${account.username}`);
-        result = { success: true, platform: 'ICONNECT', account: account.username, credits: alloc.credits, dryRun: true };
-      } else {
-        result = await iconnect.loadCredits(
-          { username: account.username },
-          alloc.credits
-        );
-      }
+      const result = await executeLoad(job, 'ICONNECT', account, job.creditsAmount);
       results.push(result);
 
-      if (iconnectAllocs.length > 1) {
+      if (iconnectJobs.length > 1) {
         await new Promise((r) => setTimeout(r, 2000 + Math.random() * 3000));
       }
     }
@@ -259,6 +230,84 @@ async function processInvoice(invoiceId, retryCount = 0) {
   }
 
   return { invoiceId, results, allSuccess };
+}
+
+// Create LoadJob records for allocations that don't have them yet
+async function ensureLoadJobs(invoice) {
+  for (const alloc of invoice.allocations) {
+    if (alloc.credits <= 0 && Number(alloc.dollarAmount) <= 0) continue;
+
+    const existing = await prisma.loadJob.findFirst({
+      where: { invoiceId: invoice.id, vendorAccountId: alloc.vendorAccountId },
+    });
+
+    if (!existing) {
+      await prisma.loadJob.create({
+        data: {
+          invoiceId: invoice.id,
+          vendorAccountId: alloc.vendorAccountId,
+          creditsAmount: alloc.credits,
+          status: 'PENDING',
+        },
+      });
+    }
+  }
+}
+
+// Execute a single load and update the LoadJob record
+async function executeLoad(job, platform, account, credits, parentVendor, transactionType) {
+  let result;
+
+  try {
+    if (DRY_RUN) {
+      console.log(`[DRY RUN] Would load ${platform}: ${credits} credits to ${account.username}`);
+      result = { success: true, platform, account: account.username, credits, dryRun: true };
+    } else if (platform === 'PLAY777') {
+      result = await play777.loadCredits(
+        { username: account.username, operatorId: account.operatorId },
+        credits,
+        parentVendor,
+        transactionType
+      );
+    } else {
+      result = await iconnect.loadCredits(
+        { username: account.username },
+        credits
+      );
+    }
+  } catch (err) {
+    result = { success: false, error: err.message, platform, account: account.username };
+  }
+
+  // Update LoadJob record
+  await prisma.loadJob.update({
+    where: { id: job.id },
+    data: {
+      status: result.success ? 'SUCCESS' : 'FAILED',
+      attempts: { increment: 1 },
+      errorMessage: result.success ? null : (result.error || 'Unknown error'),
+      completedAt: result.success ? new Date() : null,
+    },
+  });
+
+  // Reset to PENDING if failed (so retry picks it up)
+  if (!result.success) {
+    await prisma.loadJob.update({
+      where: { id: job.id },
+      data: { status: 'PENDING' },
+    });
+  }
+
+  return result;
+}
+
+async function markAllJobsFailed(jobs, errorMessage) {
+  for (const job of jobs) {
+    await prisma.loadJob.update({
+      where: { id: job.id },
+      data: { status: 'FAILED', errorMessage, attempts: { increment: 1 } },
+    });
+  }
 }
 
 module.exports = { processInvoice };

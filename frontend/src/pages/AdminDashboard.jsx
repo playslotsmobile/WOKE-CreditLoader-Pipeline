@@ -1,20 +1,35 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import InvoicePipeline from '../components/InvoicePipeline';
 
 const STATUSES = ['REQUESTED', 'PENDING', 'PAID', 'LOADING', 'LOADED'];
+
+function getAuthHeaders() {
+  const token = localStorage.getItem('admin_token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 export default function AdminDashboard() {
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState('pipeline');
   const [vendorStats, setVendorStats] = useState([]);
+  const navigate = useNavigate();
+
+  function handleAuthError(err) {
+    if (err.response?.status === 401) {
+      localStorage.removeItem('admin_token');
+      navigate('/admin/login');
+    }
+  }
 
   const fetchInvoices = useCallback(async () => {
     try {
-      const res = await axios.get('/api/admin/invoices');
+      const res = await axios.get('/api/admin/invoices', { headers: getAuthHeaders() });
       setInvoices(res.data);
     } catch (err) {
+      handleAuthError(err);
       console.error('Failed to fetch invoices:', err);
     } finally {
       setLoading(false);
@@ -23,14 +38,19 @@ export default function AdminDashboard() {
 
   const fetchVendorStats = useCallback(async () => {
     try {
-      const res = await axios.get('/api/admin/vendor-stats');
+      const res = await axios.get('/api/admin/vendor-stats', { headers: getAuthHeaders() });
       setVendorStats(res.data);
     } catch (err) {
+      handleAuthError(err);
       console.error('Failed to fetch vendor stats:', err);
     }
   }, []);
 
   useEffect(() => {
+    if (!localStorage.getItem('admin_token')) {
+      navigate('/admin/login');
+      return;
+    }
     fetchInvoices();
     fetchVendorStats();
     const interval = setInterval(fetchInvoices, 5000);
@@ -39,27 +59,30 @@ export default function AdminDashboard() {
 
   async function handleConfirmWire(invoiceId) {
     try {
-      await axios.post(`/api/admin/invoices/${invoiceId}/confirm-wire`);
+      await axios.post(`/api/admin/invoices/${invoiceId}/confirm-wire`, {}, { headers: getAuthHeaders() });
       fetchInvoices();
     } catch (err) {
+      handleAuthError(err);
       alert(err.response?.data?.error || 'Failed to confirm wire');
     }
   }
 
   async function handleTriggerLoad(invoiceId) {
     try {
-      await axios.post(`/api/admin/invoices/${invoiceId}/trigger-load`);
+      await axios.post(`/api/admin/invoices/${invoiceId}/trigger-load`, {}, { headers: getAuthHeaders() });
       fetchInvoices();
     } catch (err) {
+      handleAuthError(err);
       alert(err.response?.data?.error || 'Failed to trigger load');
     }
   }
 
   async function handleResendEmail(invoiceId) {
     try {
-      const res = await axios.post(`/api/admin/invoices/${invoiceId}/resend-email`);
+      const res = await axios.post(`/api/admin/invoices/${invoiceId}/resend-email`, {}, { headers: getAuthHeaders() });
       alert(res.data.message);
     } catch (err) {
+      handleAuthError(err);
       alert(err.response?.data?.error || 'Failed to resend email');
     }
   }
@@ -110,6 +133,12 @@ export default function AdminDashboard() {
                 className="text-xs px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-white transition"
               >
                 Refresh
+              </button>
+              <button
+                onClick={() => { localStorage.removeItem('admin_token'); navigate('/admin/login'); }}
+                className="text-xs px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-white transition"
+              >
+                Logout
               </button>
             </div>
           </div>

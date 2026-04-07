@@ -52,6 +52,15 @@ router.post('/qb-webhook', async (req, res) => {
 async function handlePayment(paymentId) {
   console.log(`QB webhook: Payment received — ID ${paymentId}`);
 
+  // Idempotency check — skip if already processed
+  const existing = await prisma.processedWebhook.findUnique({
+    where: { paymentId: String(paymentId) },
+  });
+  if (existing) {
+    console.log(`QB webhook: Payment ${paymentId} already processed — skipping`);
+    return;
+  }
+
   // Fetch the full payment from QB to get linked invoices
   let payment;
   try {
@@ -118,6 +127,11 @@ async function processPaymentForInvoice(invoice, paymentId) {
     console.log(`QB webhook: Invoice ${invoice.id} is ${invoice.status}, not REQUESTED — skipping`);
     return;
   }
+
+  // Record this webhook as processed
+  await prisma.processedWebhook.create({
+    data: { paymentId: String(paymentId), invoiceId: invoice.id },
+  }).catch(() => {}); // Ignore if duplicate (race condition guard)
 
   console.log(`QB webhook: Invoice ${invoice.id} (${invoice.vendor.name}) — marking PAID, triggering auto-load`);
 

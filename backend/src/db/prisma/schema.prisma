@@ -73,6 +73,8 @@ model Invoice {
   allocations InvoiceAllocation[]
   loadJobs    LoadJob[]
 
+  @@index([qbInvoiceId])
+  @@index([vendorId])
   @@map("invoices")
 }
 
@@ -87,6 +89,8 @@ model InvoiceAllocation {
   invoice       Invoice       @relation(fields: [invoiceId], references: [id])
   vendorAccount VendorAccount @relation(fields: [vendorAccountId], references: [id])
 
+  @@index([invoiceId])
+  @@index([vendorAccountId])
   @@map("invoice_allocations")
 }
 
@@ -110,6 +114,8 @@ model LoadJob {
   invoice       Invoice       @relation(fields: [invoiceId], references: [id])
   vendorAccount VendorAccount @relation(fields: [vendorAccountId], references: [id])
 
+  @@index([invoiceId])
+  @@index([vendorAccountId])
   @@map("load_jobs")
 }
 
@@ -120,4 +126,13 @@ model AdminUser {
   createdAt    DateTime @default(now()) @map("created_at")
 
   @@map("admin_users")
+}
+
+model ProcessedWebhook {
+  id         Int      @id @default(autoincrement())
+  paymentId  String   @unique @map("payment_id")
+  invoiceId  Int?     @map("invoice_id")
+  processedAt DateTime @default(now()) @map("processed_at")
+
+  @@map("processed_webhooks")
 }

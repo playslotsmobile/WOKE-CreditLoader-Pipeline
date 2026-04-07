@@ -1,9 +1,40 @@
 const express = require('express');
 const router = express.Router();
+const bcrypt = require('bcryptjs');
 const telegram = require('../services/telegram');
 const quickbooks = require('../services/quickbooks');
 const prisma = require('../db/client');
 const autoloader = require('../services/autoloader');
+const { requireAdmin, signToken } = require('../middleware/auth');
+
+// Login
+router.post('/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Username and password required' });
+    }
+
+    const admin = await prisma.adminUser.findUnique({ where: { username } });
+    if (!admin) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const valid = await bcrypt.compare(password, admin.passwordHash);
+    if (!valid) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const token = signToken(admin.id, admin.username);
+    res.json({ token, username: admin.username });
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// All routes below require auth
+router.use(requireAdmin);
 
 // Get all invoices with allocations
 router.get('/invoices', async (req, res) => {
