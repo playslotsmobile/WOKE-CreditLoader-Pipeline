@@ -7,6 +7,7 @@ const prisma = require('./db/client');
 const formRoutes = require('./routes/forms');
 const webhookRoutes = require('./routes/webhooks');
 const adminRoutes = require('./routes/admin');
+const { startWebhookProcessor } = require('./services/webhookProcessor');
 
 const app = express();
 app.use(cors());
@@ -146,4 +147,5 @@ app.listen(PORT, () => {
   console.log(`Backend running on http://localhost:${PORT}`);
   expireStaleInvoices(); // Check on startup
   setInterval(expireStaleInvoices, 60 * 60 * 1000); // Check every hour
+  startWebhookProcessor();
 });
