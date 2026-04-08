@@ -11,7 +11,7 @@ const MY_BALANCE_URL = 'https://pna.play777games.com/history/my-balance';
 const USERNAME = process.env.PLAY777_USERNAME;
 const PASSWORD = process.env.PLAY777_PASSWORD;
 
-const LOAD_TIMEOUT_MS = 3 * 60 * 1000;
+const LOAD_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes — includes verification step
 const TFA_TIMEOUT_MS = 5 * 60 * 1000;
 
 async function ensureLoggedIn(page) {
@@ -191,17 +191,34 @@ async function fillDepositModal(page, credits, transactionType = 'deposit', jobI
 }
 
 async function navigateToVendorsAndWait(page, jobId = 0) {
-  await page.goto(VENDORS_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  await page.setViewportSize({ width: 1920, height: 1080 });
-  await humanDelay(5000, 8000);
-
-  try {
-    await page.locator('table tbody tr').first().waitFor({ state: 'attached', timeout: 60000 });
-  } catch {
-    await captureFailure(page, jobId, 'VENDORS_TABLE_EMPTY');
-    throw new Error('Vendors table did not load within 60 seconds');
+  // Close any extra tabs to free memory
+  const pages = page.context().pages();
+  for (const p of pages) {
+    if (p !== page) {
+      await p.close().catch(() => {});
+    }
   }
-  await humanDelay(2000, 3000);
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await page.goto(VENDORS_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await humanDelay(5000, 8000);
+
+    try {
+      await page.locator('table tbody tr').first().waitFor({ state: 'attached', timeout: 60000 });
+      await humanDelay(2000, 3000);
+      return; // Table loaded successfully
+    } catch {
+      if (attempt === 0) {
+        logger.warn('Vendors table did not load — reloading page', { jobId, attempt });
+        await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+        await humanDelay(8000, 12000);
+      } else {
+        await captureFailure(page, jobId, 'VENDORS_TABLE_EMPTY');
+        throw new Error('Vendors table did not load after 2 attempts');
+      }
+    }
+  }
 }
 
 async function findVendorRow(page, operatorId, username, jobId = 0) {
@@ -339,6 +356,11 @@ async function loadCredits(account, credits, parentVendor, transactionType = 'de
   const doLoad = async () => {
     session = await getBrowserContext('play777');
     const context = session.context;
+
+    // Close all existing pages to free memory
+    for (const p of context.pages()) {
+      await p.close().catch(() => {});
+    }
 
     await restoreSession(context, 'play777');
 
