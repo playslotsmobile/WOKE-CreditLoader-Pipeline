@@ -104,7 +104,8 @@ async function processInvoice(invoiceId, retryCount = 0) {
         { username: source.username, operatorId: source.operatorId },
         totalCorrectionCredits,
         null,
-        'correction'
+        'correction',
+        pendingJobs[0].id
       );
     }
 
@@ -364,12 +365,14 @@ async function executeLoad(job, platform, account, credits, parentVendor, transa
         { username: account.username, operatorId: account.operatorId },
         credits,
         parentVendor,
-        transactionType
+        transactionType,
+        job.id
       );
     } else {
       result = await iconnect.loadCredits(
         { username: account.username },
-        credits
+        credits,
+        job.id
       );
     }
   } catch (err) {
