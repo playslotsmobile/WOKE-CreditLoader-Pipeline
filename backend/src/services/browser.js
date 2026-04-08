@@ -1,15 +1,15 @@
-const { chromium } = require('playwright-extra');
-const stealth = require('puppeteer-extra-plugin-stealth');
+const { chromium } = require('playwright');
 const { logger } = require('./logger');
 
-// Apply stealth plugin
-chromium.use(stealth());
+// AdsPower API config
+const ADSPOWER_API = process.env.ADSPOWER_API_URL || 'http://127.0.0.1:50325';
+const ADSPOWER_TOKEN = process.env.ADSPOWER_API_KEY;
 
-// Proxy config — DataImpulse residential premium
-const PROXY_HOST = process.env.PROXY_HOST || 'gw.dataimpulse.com';
-const PROXY_PORT = process.env.PROXY_PORT || '823';
-const PROXY_USER = process.env.PROXY_USER;
-const PROXY_PASS = process.env.PROXY_PASS;
+// AdsPower profile IDs per platform
+const PROFILE_IDS = {
+  play777: process.env.ADSPOWER_PLAY777_ID,
+  iconnect: process.env.ADSPOWER_ICONNECT_ID,
+};
 
 // Rate limiter — track launches per platform
 const launchHistory = {};
@@ -54,52 +54,130 @@ async function humanMouseMove(page) {
   await page.mouse.move(x, y, { steps: 5 + Math.floor(Math.random() * 10) });
 }
 
-// Launch a browser with stealth and proxy
+// Check if AdsPower API is responsive
+async function checkAdsPowerHealth() {
+  try {
+    const res = await fetch(`${ADSPOWER_API}/api/v1/user/list?page_size=1`, {
+      headers: { Authorization: `Bearer ${ADSPOWER_TOKEN}` },
+      signal: AbortSignal.timeout(5000),
+    });
+    const data = await res.json();
+    return data.code === 0;
+  } catch {
+    return false;
+  }
+}
+
+// Try to restart AdsPower via systemd
+async function restartAdsPower() {
+  const { exec } = require('child_process');
+  return new Promise((resolve) => {
+    exec('systemctl restart adspower', (err) => {
+      if (err) {
+        logger.error('Failed to restart AdsPower service', { error: err });
+        resolve(false);
+      } else {
+        logger.info('AdsPower service restarted');
+        resolve(true);
+      }
+    });
+  });
+}
+
+// Launch an AdsPower profile with auto-recovery
 async function getBrowserContext(platform) {
+  const profileId = PROFILE_IDS[platform];
+  if (!profileId) {
+    throw new Error(`No AdsPower profile ID configured for platform: ${platform}. Set ADSPOWER_${platform.toUpperCase()}_ID in .env`);
+  }
+
   checkRateLimit(platform);
 
-  const launchArgs = [
+  // Health check — try to recover if AdsPower is down
+  let healthy = await checkAdsPowerHealth();
+  if (!healthy) {
+    logger.warn('AdsPower API unreachable — attempting recovery', { platform });
+
+    // Try 1: restart the service
+    await restartAdsPower();
+    await new Promise((r) => setTimeout(r, 15000)); // Wait 15s for startup
+    healthy = await checkAdsPowerHealth();
+
+    if (!healthy) {
+      throw new Error('AdsPower is not responding after restart attempt');
+    }
+    logger.info('AdsPower recovered after restart');
+  }
+
+  // Stop any lingering instance of this profile
+  try {
+    await fetch(`${ADSPOWER_API}/api/v1/browser/stop?user_id=${profileId}`, {
+      headers: { Authorization: `Bearer ${ADSPOWER_TOKEN}` },
+    });
+    await new Promise((r) => setTimeout(r, 2000));
+  } catch {}
+
+  // Start the profile
+  const launchArgs = encodeURIComponent(JSON.stringify([
     '--no-sandbox',
     '--disable-gpu',
     '--disable-software-rasterizer',
     '--disable-dev-shm-usage',
     '--js-flags=--max-old-space-size=512',
-  ];
+  ]));
+  const startUrl = `${ADSPOWER_API}/api/v1/browser/start?user_id=${profileId}&launch_args=${launchArgs}`;
 
-  const launchOptions = {
-    headless: true,
-    args: launchArgs,
-  };
-
-  // Add proxy if credentials are configured
-  if (PROXY_USER && PROXY_PASS) {
-    launchOptions.proxy = {
-      server: `http://${PROXY_HOST}:${PROXY_PORT}`,
-      username: PROXY_USER,
-      password: PROXY_PASS,
-    };
+  let data;
+  try {
+    const res = await fetch(startUrl, {
+      headers: { Authorization: `Bearer ${ADSPOWER_TOKEN}` },
+    });
+    data = await res.json();
+  } catch (err) {
+    throw new Error(`Failed to start AdsPower profile: ${err.message}`);
   }
 
-  const browser = await chromium.launch(launchOptions);
-  const context = await browser.newContext({
-    viewport: { width: 1920, height: 1080 },
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-  });
+  if (data.code !== 0) {
+    // Retry once after a brief wait
+    logger.warn('AdsPower profile start failed, retrying', { platform, msg: data.msg });
+    await new Promise((r) => setTimeout(r, 5000));
 
-  logger.info('Browser launched', { platform, proxy: PROXY_USER ? 'enabled' : 'disabled' });
+    try {
+      const res = await fetch(startUrl, {
+        headers: { Authorization: `Bearer ${ADSPOWER_TOKEN}` },
+      });
+      data = await res.json();
+    } catch (err) {
+      throw new Error(`Failed to start AdsPower profile on retry: ${err.message}`);
+    }
 
-  return { browser, context, platform };
+    if (data.code !== 0) {
+      throw new Error(`AdsPower failed to start profile after retry: ${data.msg}`);
+    }
+  }
+
+  const debugPort = data.data.debug_port;
+  logger.info('AdsPower profile launched', { platform, debugPort });
+
+  // Connect Playwright via CDP
+  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${debugPort}`);
+  const context = browser.contexts()[0];
+
+  return { browser, context, profileId, platform };
 }
 
-// Close browser
+// Close the AdsPower browser profile
 async function closeBrowser(session) {
-  try {
-    if (session.browser) {
-      await session.browser.close();
-      logger.info('Browser closed', { platform: session.platform });
+  if (session.profileId) {
+    try {
+      const stopUrl = `${ADSPOWER_API}/api/v1/browser/stop?user_id=${session.profileId}`;
+      await fetch(stopUrl, {
+        headers: { Authorization: `Bearer ${ADSPOWER_TOKEN}` },
+      });
+      logger.info('AdsPower profile closed', { platform: session.platform });
+    } catch (err) {
+      logger.error('Failed to close AdsPower profile', { error: err });
     }
-  } catch (err) {
-    logger.error('Failed to close browser', { error: err });
   }
 }
 
@@ -109,4 +187,5 @@ module.exports = {
   humanDelay,
   humanType,
   humanMouseMove,
+  checkAdsPowerHealth,
 };
