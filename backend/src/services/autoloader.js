@@ -8,6 +8,36 @@ const DRY_RUN = process.env.DRY_RUN === 'true';
 const MAX_RETRIES = 3;
 const RETRY_DELAYS = [30000, 60000, 120000]; // 30s, 60s, 2min
 
+// Sequential load queue — only one invoice processes at a time
+const loadQueue = [];
+let processing = false;
+
+function enqueueInvoice(invoiceId, retryCount = 0) {
+  return new Promise((resolve, reject) => {
+    loadQueue.push({ invoiceId, retryCount, resolve, reject });
+    processQueue();
+  });
+}
+
+async function processQueue() {
+  if (processing || loadQueue.length === 0) return;
+  processing = true;
+
+  const { invoiceId, retryCount, resolve, reject } = loadQueue.shift();
+  try {
+    const result = await processInvoiceInternal(invoiceId, retryCount);
+    resolve(result);
+  } catch (err) {
+    reject(err);
+  } finally {
+    processing = false;
+    if (loadQueue.length > 0) {
+      // Small delay between queued invoices
+      setTimeout(processQueue, 3000);
+    }
+  }
+}
+
 async function emitEvent(loadJobId, step, status, metadata = null, screenshotPath = null) {
   try {
     await prisma.loadEvent.create({
@@ -18,8 +48,13 @@ async function emitEvent(loadJobId, step, status, metadata = null, screenshotPat
   }
 }
 
-// Process all load jobs for an invoice
+// Public entry point — queues invoices for sequential processing
 async function processInvoice(invoiceId, retryCount = 0) {
+  return enqueueInvoice(invoiceId, retryCount);
+}
+
+// Internal processor — only called from the queue
+async function processInvoiceInternal(invoiceId, retryCount = 0) {
   const invoice = await prisma.invoice.findUnique({
     where: { id: invoiceId },
     include: {
