@@ -4,9 +4,6 @@ const TelegramBot = require('node-telegram-bot-api');
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: false });
 const ADMIN_CHAT_ID = process.env.TELEGRAM_ADMIN_CHAT_ID;
 
-const ADSPOWER_API = 'http://local.adspower.net:50325';
-const ADSPOWER_TOKEN = process.env.ADSPOWER_API_KEY;
-
 const checks = [];
 
 async function check(name, fn) {
@@ -33,45 +30,13 @@ async function run() {
     await qb.findCustomer('Cody Trejo');
   });
 
-  // 3. AdsPower API
-  await check('AdsPower API', async () => {
-    const res = await fetch(`${ADSPOWER_API}/api/v1/user/list?page_size=1`, {
-      headers: { Authorization: `Bearer ${ADSPOWER_TOKEN}` },
-    });
-    const data = await res.json();
-    if (data.code !== 0) throw new Error(data.msg);
-  });
-
-  // 4. AdsPower Play777 profile
-  await check('AdsPower Play777 Profile', async () => {
-    const profileId = process.env.ADSPOWER_PLAY777_ID;
-    const res = await fetch(
-      `${ADSPOWER_API}/api/v1/browser/active?user_id=${profileId}`,
-      { headers: { Authorization: `Bearer ${ADSPOWER_TOKEN}` } }
-    );
-    const data = await res.json();
-    // Profile either active or inactive is fine — just need AdsPower to respond
-    if (data.code !== 0 && !data.data) throw new Error(data.msg);
-  });
-
-  // 5. AdsPower IConnect profile
-  await check('AdsPower IConnect Profile', async () => {
-    const profileId = process.env.ADSPOWER_ICONNECT_ID;
-    const res = await fetch(
-      `${ADSPOWER_API}/api/v1/browser/active?user_id=${profileId}`,
-      { headers: { Authorization: `Bearer ${ADSPOWER_TOKEN}` } }
-    );
-    const data = await res.json();
-    if (data.code !== 0 && !data.data) throw new Error(data.msg);
-  });
-
-  // 6. Database
+  // 3. Database
   await check('Database', async () => {
     const prisma = require('./db/client');
     await prisma.vendor.count();
   });
 
-  // 7. SSL / External access
+  // 4. SSL / External access
   await check('External HTTPS', async () => {
     const res = await fetch('https://load.wokeavr.com/api/vendors/mike', {
       signal: AbortSignal.timeout(15000),
