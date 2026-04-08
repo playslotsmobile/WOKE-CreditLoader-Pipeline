@@ -8,6 +8,7 @@ const formRoutes = require('./routes/forms');
 const webhookRoutes = require('./routes/webhooks');
 const adminRoutes = require('./routes/admin');
 const { startWebhookProcessor } = require('./services/webhookProcessor');
+const { startHealthChecks } = require('./services/healthDigest');
 
 const app = express();
 app.use(cors());
@@ -148,4 +149,5 @@ app.listen(PORT, () => {
   expireStaleInvoices(); // Check on startup
   setInterval(expireStaleInvoices, 60 * 60 * 1000); // Check every hour
   startWebhookProcessor();
+  startHealthChecks();
 });

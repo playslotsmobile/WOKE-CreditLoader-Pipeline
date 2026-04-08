@@ -215,4 +215,5 @@ module.exports = {
   sendInvoiceEmail,
   getInvoice,
   getPayment,
+  qbRequest,
 };
