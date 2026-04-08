@@ -130,6 +130,13 @@ async function handlePayment(paymentId, log) {
       data: { status: 'PAID', paidAt: new Date() },
     });
 
+    try {
+      await telegram.sendVendorPaid(
+        { telegramChatId: invoice.vendor.telegramChatId },
+        { totalAmount: invoice.totalAmount, id: invoice.id }
+      );
+    } catch {}
+
     autoloader.processInvoice(invoice.id).catch(async (err) => {
       log.error('Auto-loader failed', { invoiceId: invoice.id, error: err });
       try {

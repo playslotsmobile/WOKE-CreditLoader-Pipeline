@@ -112,9 +112,35 @@ ${allocationBlocksCreditsOnly(allocations)}`;
   }
 }
 
+async function sendVendorPaid(vendor, invoice) {
+  if (!vendor.telegramChatId) return;
+  try {
+    await bot.sendMessage(
+      vendor.telegramChatId,
+      `💰 Payment Received\n\nYour payment of ${fmt(invoice.totalAmount)} has been received. Credits are being loaded.`
+    );
+  } catch (err) {
+    console.error('Telegram vendor paid notification failed:', err.message);
+  }
+}
+
+async function sendVendorFailed(vendor, invoice) {
+  if (!vendor.telegramChatId) return;
+  try {
+    await bot.sendMessage(
+      vendor.telegramChatId,
+      `⚠️ Loading Issue\n\nThere was an issue loading your credits for invoice #${invoice.id}. Our team has been notified and will resolve this shortly.`
+    );
+  } catch (err) {
+    console.error('Telegram vendor failed notification failed:', err.message);
+  }
+}
+
 module.exports = {
   bot,
   sendWireSubmitted,
   sendInvoiceSent,
   sendLoaded,
+  sendVendorPaid,
+  sendVendorFailed,
 };

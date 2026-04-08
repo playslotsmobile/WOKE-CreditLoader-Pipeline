@@ -316,6 +316,13 @@ async function processInvoice(invoiceId, retryCount = 0) {
       } catch (err) {
         logger.error('Telegram failure alert failed', { error: err.message });
       }
+
+      try {
+        await telegram.sendVendorFailed(
+          { telegramChatId: invoice.vendor.telegramChatId },
+          { id: invoice.id }
+        );
+      } catch {}
     }
   }
 
