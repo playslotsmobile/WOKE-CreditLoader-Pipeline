@@ -4,6 +4,9 @@ const { logger } = require('./logger');
 
 const log = logger.child({ service: 'healthDigest' });
 
+const ADSPOWER_API = process.env.ADSPOWER_API_URL || 'http://127.0.0.1:50325';
+const ADSPOWER_TOKEN = process.env.ADSPOWER_API_KEY;
+
 async function sendDailyDigest() {
   try {
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -12,6 +15,16 @@ async function sendDailyDigest() {
     const failed = await prisma.invoice.count({ where: { status: 'FAILED', submittedAt: { gte: since } } });
     const stuckLoading = await prisma.invoice.count({ where: { status: 'LOADING' } });
     const stuckRequested = await prisma.invoice.count({ where: { status: 'REQUESTED' } });
+
+    let adspowerOk = false;
+    try {
+      const res = await fetch(`${ADSPOWER_API}/api/v1/user/list?page_size=1`, {
+        headers: { Authorization: `Bearer ${ADSPOWER_TOKEN}` },
+        signal: AbortSignal.timeout(5000),
+      });
+      const data = await res.json();
+      adspowerOk = data.code === 0;
+    } catch {}
 
     const failedWebhooks = await prisma.webhookEvent.count({ where: { status: 'FAILED' } });
 
@@ -26,7 +39,7 @@ Stuck:
 📋 REQUESTED: ${stuckRequested}
 
 Infrastructure:
-✅ Browser: Playwright + Stealth
+${adspowerOk ? '✅' : '❌'} AdsPower API
 ${failedWebhooks > 0 ? `⚠️ ${failedWebhooks} failed webhooks` : '✅ Webhooks OK'}
 
 ⏰ ${new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' })}`;

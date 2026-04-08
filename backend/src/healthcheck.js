@@ -4,6 +4,9 @@ const TelegramBot = require('node-telegram-bot-api');
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: false });
 const ADMIN_CHAT_ID = process.env.TELEGRAM_ADMIN_CHAT_ID;
 
+const ADSPOWER_API = 'http://local.adspower.net:50325';
+const ADSPOWER_TOKEN = process.env.ADSPOWER_API_KEY;
+
 const checks = [];
 
 async function check(name, fn) {
@@ -42,6 +45,15 @@ async function run() {
       signal: AbortSignal.timeout(15000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  });
+
+  // 5. AdsPower API
+  await check('AdsPower API', async () => {
+    const res = await fetch(`${ADSPOWER_API}/api/v1/user/list?page_size=1`, {
+      headers: { Authorization: `Bearer ${ADSPOWER_TOKEN}` },
+    });
+    const data = await res.json();
+    if (data.code !== 0) throw new Error(data.msg);
   });
 
   // Report
