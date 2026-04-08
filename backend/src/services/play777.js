@@ -191,14 +191,6 @@ async function fillDepositModal(page, credits, transactionType = 'deposit', jobI
 }
 
 async function navigateToVendorsAndWait(page, jobId = 0) {
-  // Close any extra tabs to free memory
-  const pages = page.context().pages();
-  for (const p of pages) {
-    if (p !== page) {
-      await p.close().catch(() => {});
-    }
-  }
-
   for (let attempt = 0; attempt < 2; attempt++) {
     await page.goto(VENDORS_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.setViewportSize({ width: 1920, height: 1080 });
@@ -357,14 +349,11 @@ async function loadCredits(account, credits, parentVendor, transactionType = 'de
     session = await getBrowserContext('play777');
     const context = session.context;
 
-    // Close all existing pages to free memory
-    for (const p of context.pages()) {
-      await p.close().catch(() => {});
-    }
-
     await restoreSession(context, 'play777');
 
-    const page = await context.newPage();
+    // Reuse existing page or create new one (avoids tab buildup)
+    const existingPages = context.pages();
+    const page = existingPages.length > 0 ? existingPages[0] : await context.newPage();
     await page.setViewportSize({ width: 1920, height: 1080 });
 
     const loggedIn = await ensureLoggedIn(page);
