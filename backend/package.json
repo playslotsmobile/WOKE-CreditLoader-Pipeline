@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
+    "test": "jest --no-cache",
     "db:migrate": "npx prisma migrate dev --schema=src/db/prisma/schema.prisma",
     "db:generate": "npx prisma generate --schema=src/db/prisma/schema.prisma",
     "db:studio": "npx prisma studio --schema=src/db/prisma/schema.prisma"
@@ -25,6 +26,7 @@
     "puppeteer-extra-plugin-stealth": "^2.11.2"
   },
   "devDependencies": {
+    "jest": "^30.3.0",
     "nodemon": "^3.0.0",
     "prisma": "^5.0.0"
   }
