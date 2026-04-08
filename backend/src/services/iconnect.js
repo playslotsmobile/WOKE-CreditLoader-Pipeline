@@ -1,10 +1,13 @@
 const { getBrowserContext, closeBrowser, humanDelay, humanType, humanMouseMove } = require('./browser');
+const { restoreSession, saveSession } = require('./browserSession');
+const { captureFailure } = require('./screenshot');
 const { logger } = require('./logger');
 
 const SHOP_URL = 'https://river-pay.com/agent/show';
-const LOGIN_URL = 'https://river-pay.com/office/login';
 const USERNAME = process.env.ICONNECT_USERNAME;
 const PASSWORD = process.env.ICONNECT_PASSWORD;
+
+const LOAD_TIMEOUT_MS = 3 * 60 * 1000;
 
 async function ensureLoggedIn(page) {
   await page.goto(SHOP_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -29,25 +32,28 @@ async function ensureLoggedIn(page) {
     logger.info('IConnect: Login successful');
     return true;
   } catch (e) {
+    await captureFailure(page, 0, 'ICONNECT_LOGIN_FAILED');
     logger.error('IConnect: Login failed', { error: e });
     return false;
   }
 }
 
-const LOAD_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes max per load operation
-
-// Load credits to a shop account
-async function loadCredits(account, credits) {
+async function loadCredits(account, credits, jobId = 0) {
   let session;
 
   const doLoad = async () => {
     session = await getBrowserContext('iconnect');
     const context = session.context;
+
+    await restoreSession(context, 'iconnect');
+
     const page = await context.newPage();
     await page.setViewportSize({ width: 1920, height: 1080 });
 
     const loggedIn = await ensureLoggedIn(page);
     if (!loggedIn) throw new Error('Failed to login to IConnect');
+
+    await saveSession(context, 'iconnect');
 
     await humanDelay(2000, 4000);
 
@@ -61,12 +67,14 @@ async function loadCredits(account, credits) {
     const depositBtn = page.locator(`button[onclick*="'${account.username}'"]`);
     const btnCount = await depositBtn.count();
     if (btnCount === 0) {
+      await captureFailure(page, jobId, 'ICONNECT_USER_NOT_FOUND');
       throw new Error(`User "${account.username}" not found in IConnect table`);
     }
 
     const onclick = await depositBtn.first().getAttribute('onclick');
     const match = onclick.match(/initDepositModal\(\s*'(\d+)',\s*'([^']+)',\s*'(\d+)',\s*'([^']+)'/);
     if (!match) {
+      await captureFailure(page, jobId, 'ICONNECT_PARSE_FAILED');
       throw new Error('Could not parse deposit button onclick params');
     }
 
@@ -104,8 +112,10 @@ async function loadCredits(account, credits) {
 
     if (page.url().includes('/agent/show')) {
       logger.info('IConnect: Successfully loaded credits', { credits, username: account.username });
+      await saveSession(context, 'iconnect');
       return { success: true, platform: 'ICONNECT', account: account.username, credits };
     } else {
+      await captureFailure(page, jobId, 'ICONNECT_DEPOSIT_FAILED');
       throw new Error('Page did not return to /agent/show after deposit');
     }
   };
