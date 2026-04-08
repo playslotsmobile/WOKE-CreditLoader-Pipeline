@@ -6,6 +6,7 @@ const quickbooks = require('../services/quickbooks');
 const prisma = require('../db/client');
 const autoloader = require('../services/autoloader');
 const { requireAdmin, signToken } = require('../middleware/auth');
+const { logger } = require('../services/logger');
 
 // Login
 router.post('/login', async (req, res) => {
@@ -190,6 +191,49 @@ router.get('/corrections', async (req, res) => {
   } catch (err) {
     console.error('Corrections error:', err);
     res.status(500).json({ error: 'Failed to fetch corrections' });
+  }
+});
+
+// Load events for an invoice (timeline view)
+router.get('/invoices/:id/events', async (req, res) => {
+  try {
+    const invoiceId = parseInt(req.params.id);
+
+    const loadJobs = await prisma.loadJob.findMany({
+      where: { invoiceId },
+      select: { id: true },
+    });
+    const jobIds = loadJobs.map((j) => j.id);
+
+    const events = await prisma.loadEvent.findMany({
+      where: { loadJobId: { in: jobIds } },
+      orderBy: { createdAt: 'asc' },
+      include: {
+        loadJob: {
+          select: {
+            vendorAccount: {
+              select: { username: true, platform: true },
+            },
+          },
+        },
+      },
+    });
+
+    const formatted = events.map((e) => ({
+      id: e.id,
+      step: e.step,
+      status: e.status,
+      metadata: e.metadata,
+      screenshotPath: e.screenshotPath,
+      account: e.loadJob?.vendorAccount?.username,
+      platform: e.loadJob?.vendorAccount?.platform,
+      createdAt: e.createdAt,
+    }));
+
+    res.json(formatted);
+  } catch (err) {
+    logger.error('Get events error', { error: err });
+    res.status(500).json({ error: 'Failed to fetch events' });
   }
 });
 
