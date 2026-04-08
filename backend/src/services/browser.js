@@ -1,16 +1,32 @@
-const { chromium } = require('playwright');
-const path = require('path');
+const { chromium } = require('playwright-extra');
+const stealth = require('puppeteer-extra-plugin-stealth');
 const { logger } = require('./logger');
 
-// AdsPower API config
-const ADSPOWER_API = process.env.ADSPOWER_API_URL || 'http://127.0.0.1:50325';
-const ADSPOWER_TOKEN = process.env.ADSPOWER_API_KEY;
+// Apply stealth plugin
+chromium.use(stealth());
 
-// AdsPower profile IDs per platform
-const PROFILE_IDS = {
-  play777: process.env.ADSPOWER_PLAY777_ID,
-  iconnect: process.env.ADSPOWER_ICONNECT_ID,
-};
+// Proxy config — DataImpulse residential premium
+const PROXY_HOST = process.env.PROXY_HOST || 'gw.dataimpulse.com';
+const PROXY_PORT = process.env.PROXY_PORT || '823';
+const PROXY_USER = process.env.PROXY_USER;
+const PROXY_PASS = process.env.PROXY_PASS;
+
+// Rate limiter — track launches per platform
+const launchHistory = {};
+const MAX_LAUNCHES = 3;
+const WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+
+function checkRateLimit(platform) {
+  const now = Date.now();
+  if (!launchHistory[platform]) launchHistory[platform] = [];
+  launchHistory[platform] = launchHistory[platform].filter((t) => now - t < WINDOW_MS);
+  if (launchHistory[platform].length >= MAX_LAUNCHES) {
+    const oldestInWindow = launchHistory[platform][0];
+    const waitSec = Math.ceil((WINDOW_MS - (now - oldestInWindow)) / 1000);
+    throw new Error(`Rate limit: ${MAX_LAUNCHES} browser launches in ${WINDOW_MS / 60000}min window. Wait ${waitSec}s before retrying.`);
+  }
+  launchHistory[platform].push(now);
+}
 
 // Human-like delay — randomized to look natural
 function humanDelay(min = 800, max = 2500) {
@@ -31,87 +47,65 @@ async function humanType(page, selector, text) {
   }
 }
 
-// Simulate subtle mouse movement — real users don't teleport between clicks
+// Simulate subtle mouse movement
 async function humanMouseMove(page) {
   const x = 200 + Math.floor(Math.random() * 800);
   const y = 150 + Math.floor(Math.random() * 400);
   await page.mouse.move(x, y, { steps: 5 + Math.floor(Math.random() * 10) });
 }
 
-// Rate limiter — track launches per platform
-const launchHistory = {};
-const MAX_LAUNCHES = 3;
-const WINDOW_MS = 10 * 60 * 1000; // 10 minutes
-
-function checkRateLimit(platform) {
-  const now = Date.now();
-  if (!launchHistory[platform]) launchHistory[platform] = [];
-  // Remove entries older than window
-  launchHistory[platform] = launchHistory[platform].filter((t) => now - t < WINDOW_MS);
-  if (launchHistory[platform].length >= MAX_LAUNCHES) {
-    const oldestInWindow = launchHistory[platform][0];
-    const waitSec = Math.ceil((WINDOW_MS - (now - oldestInWindow)) / 1000);
-    throw new Error(`Rate limit: ${MAX_LAUNCHES} browser launches in ${WINDOW_MS / 60000}min window. Wait ${waitSec}s before retrying.`);
-  }
-  launchHistory[platform].push(now);
-}
-
-// Launch an AdsPower profile and connect Playwright to it
+// Launch a browser with stealth and proxy
 async function getBrowserContext(platform) {
-  const profileId = PROFILE_IDS[platform];
-  if (!profileId) {
-    throw new Error(`No AdsPower profile ID configured for platform: ${platform}. Set ADSPOWER_${platform.toUpperCase()}_ID in .env`);
-  }
-
   checkRateLimit(platform);
 
-  // Start the AdsPower browser profile with memory-saving flags
-  const launchArgs = encodeURIComponent(JSON.stringify([
+  const launchArgs = [
     '--no-sandbox',
     '--disable-gpu',
     '--disable-software-rasterizer',
     '--disable-dev-shm-usage',
     '--js-flags=--max-old-space-size=512',
-  ]));
-  const startUrl = `${ADSPOWER_API}/api/v1/browser/start?user_id=${profileId}&launch_args=${launchArgs}`;
-  const res = await fetch(startUrl, {
-    headers: { 'Authorization': `Bearer ${ADSPOWER_TOKEN}` },
+  ];
+
+  const launchOptions = {
+    headless: true,
+    args: launchArgs,
+  };
+
+  // Add proxy if credentials are configured
+  if (PROXY_USER && PROXY_PASS) {
+    launchOptions.proxy = {
+      server: `http://${PROXY_HOST}:${PROXY_PORT}`,
+      username: PROXY_USER,
+      password: PROXY_PASS,
+    };
+  }
+
+  const browser = await chromium.launch(launchOptions);
+  const context = await browser.newContext({
+    viewport: { width: 1920, height: 1080 },
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
   });
-  const data = await res.json();
 
-  if (data.code !== 0) {
-    throw new Error(`AdsPower failed to start profile: ${data.msg}`);
-  }
+  logger.info('Browser launched', { platform, proxy: PROXY_USER ? 'enabled' : 'disabled' });
 
-  const wsUrl = data.data.ws.puppeteer;
-  const debugPort = data.data.debug_port;
-  logger.info('AdsPower profile launched', { platform, debugPort });
-
-  // Connect Playwright via CDP
-  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${debugPort}`);
-  const context = browser.contexts()[0];
-
-  return { browser, context, profileId, debugPort };
+  return { browser, context, platform };
 }
 
-// Close the AdsPower browser profile
+// Close browser
 async function closeBrowser(session) {
-  if (session.profileId) {
-    const stopUrl = `${ADSPOWER_API}/api/v1/browser/stop?user_id=${session.profileId}`;
-    await fetch(stopUrl, {
-      headers: { 'Authorization': `Bearer ${ADSPOWER_TOKEN}` },
-    }).catch(() => {});
-    logger.info('AdsPower profile closed');
+  try {
+    if (session.browser) {
+      await session.browser.close();
+      logger.info('Browser closed', { platform: session.platform });
+    }
+  } catch (err) {
+    logger.error('Failed to close browser', { error: err });
   }
 }
-
-// No-op — AdsPower handles session persistence automatically
-async function saveSession() {}
 
 module.exports = {
   getBrowserContext,
   closeBrowser,
-  saveSession,
   humanDelay,
   humanType,
   humanMouseMove,
