@@ -107,6 +107,14 @@ router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) =>
     // Save wire receipt path if uploaded
     if (req.file) {
       console.log(`Wire receipt saved: ${req.file.filename}`);
+      // Backup wire receipt
+      const backupDir = '/var/backups/creditloader/receipts';
+      try {
+        fs.mkdirSync(backupDir, { recursive: true });
+        fs.copyFileSync(req.file.path, path.join(backupDir, req.file.filename));
+      } catch (backupErr) {
+        console.error('Wire receipt backup failed:', backupErr.message);
+      }
     }
 
     if (isWire) {
