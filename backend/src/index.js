@@ -10,6 +10,7 @@ const adminRoutes = require('./routes/admin');
 const { startWebhookProcessor } = require('./services/webhookProcessor');
 const { startHealthChecks } = require('./services/healthDigest');
 const { logger } = require('./services/logger');
+const { requireAdmin } = require('./middleware/auth');
 
 const app = express();
 app.use(cors());
@@ -120,6 +121,9 @@ app.get('/api/qb-callback', async (req, res) => {
 app.use('/api', formRoutes);
 app.use('/api', webhookRoutes);
 app.use('/api/admin', adminRoutes);
+
+// Serve failure screenshots for admin dashboard
+app.use('/api/screenshots', requireAdmin, express.static('/var/log/creditloader/failures'));
 
 // Serve frontend static files
 const publicPath = path.join(__dirname, '..', 'public');
