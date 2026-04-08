@@ -1,11 +1,17 @@
 const { getBrowserContext, closeBrowser, humanDelay, humanType, humanMouseMove } = require('./browser');
+const { restoreSession, saveSession } = require('./browserSession');
+const { captureFailure } = require('./screenshot');
 const telegram = require('./telegram');
+const prisma = require('../db/client');
 const { logger } = require('./logger');
 
 const DASHBOARD_URL = 'https://pna.play777games.com/dashboard';
 const VENDORS_URL = 'https://pna.play777games.com/vendors-overview';
 const USERNAME = process.env.PLAY777_USERNAME;
 const PASSWORD = process.env.PLAY777_PASSWORD;
+
+const LOAD_TIMEOUT_MS = 3 * 60 * 1000;
+const TFA_TIMEOUT_MS = 5 * 60 * 1000;
 
 async function ensureLoggedIn(page) {
   await page.goto(DASHBOARD_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -34,38 +40,81 @@ async function ensureLoggedIn(page) {
   await humanDelay(500, 1000);
   await page.click('button.btn.btn-primary');
 
-  try {
-    await page.waitForURL((url) => !url.toString().includes('/login'), { timeout: 15000 });
+  await humanDelay(5000, 7000);
+
+  if (page.url().includes('login-2fa')) {
+    logger.warn('Play777: 2FA triggered — waiting for code via dashboard');
+    try {
+      await telegram.bot.sendMessage(
+        process.env.TELEGRAM_ADMIN_CHAT_ID,
+        '🔐 Play777 requires 2FA.\n\nEnter code in admin dashboard (Settings → 2FA Code) within 5 minutes.'
+      );
+    } catch {}
+
+    const code = await poll2FACode();
+    if (!code) {
+      await captureFailure(page, 0, '2FA_TIMEOUT');
+      throw new Error('2FA code not received within 5 minutes');
+    }
+
+    const codeInput = page.locator('input[name="code"], input[type="text"]').first();
+    await codeInput.waitFor({ state: 'visible', timeout: 10000 });
+    await codeInput.fill(code);
+    await humanDelay(300, 500);
+    await page.locator('button:has-text("Verify"), button[type="submit"]').first().click();
+    await humanDelay(5000, 7000);
+
+    await prisma.setting.delete({ where: { key: 'play777_2fa_code' } }).catch(() => {});
+
+    if (page.url().includes('/login')) {
+      await captureFailure(page, 0, '2FA_FAILED');
+      throw new Error('2FA code was rejected');
+    }
+    logger.info('Play777: 2FA completed successfully');
+  }
+
+  if (!page.url().includes('/login')) {
     logger.info('Play777: Login successful');
     return true;
-  } catch (e) {
-    const content = await page.content();
-    if (content.includes('verification') || content.includes('2fa') || content.includes('code')) {
-      logger.warn('Play777: 2FA triggered — alerting admin');
-      try {
-        await telegram.bot.sendMessage(
-          process.env.TELEGRAM_ADMIN_CHAT_ID,
-          '🔐 Play777 requires 2FA. Please log in manually in AdsPower and restart.'
-        );
-      } catch (err) {
-        logger.error('Failed to send 2FA alert', { error: err });
-      }
-      return false;
-    }
-    logger.error('Play777: Login failed', { error: e });
-    return false;
   }
+
+  await captureFailure(page, 0, 'LOGIN_FAILED');
+  throw new Error('Login failed — still on login page');
 }
 
-// Fill the deposit modal and confirm.
-// Modal must already be open with vendor/operator pre-filled.
-// transactionType: 'deposit' (default) or 'correction'
-async function fillDepositModal(page, credits, transactionType = 'deposit') {
+async function poll2FACode() {
+  const startTime = Date.now();
+  while (Date.now() - startTime < TFA_TIMEOUT_MS) {
+    try {
+      const setting = await prisma.setting.findUnique({ where: { key: 'play777_2fa_code' } });
+      if (setting && setting.value) {
+        logger.info('Play777: 2FA code received from dashboard');
+        return setting.value;
+      }
+    } catch {}
+    await new Promise((r) => setTimeout(r, 5000));
+  }
+  return null;
+}
+
+async function findElement(page, strategies, description) {
+  for (const selector of strategies) {
+    try {
+      const el = page.locator(selector);
+      const count = await el.count();
+      if (count > 0) {
+        return el.first();
+      }
+    } catch {}
+  }
+  throw new Error(`Could not find element: ${description}. Tried: ${strategies.join(', ')}`);
+}
+
+async function fillDepositModal(page, credits, transactionType = 'deposit', jobId = 0) {
   const form = page.locator('#app-form-agent-balance');
   await form.waitFor({ state: 'attached', timeout: 10000 });
   await humanDelay(800, 1500);
 
-  // Switch transaction type if needed (default is Deposit)
   if (transactionType === 'correction') {
     const txTypeSelect = form.locator('.multiselect').nth(0);
     await txTypeSelect.click();
@@ -76,22 +125,17 @@ async function fillDepositModal(page, credits, transactionType = 'deposit') {
     await humanDelay(800, 1500);
   }
 
-  // Select "Wire Transfer" from Payment Method dropdown (not shown for corrections)
   if (transactionType !== 'correction') {
     await humanMouseMove(page);
     const paymentMethodSelect = form.locator('.multiselect').nth(1);
     await paymentMethodSelect.click();
     await humanDelay(500, 1000);
-
     const wireOption = form.locator('li[aria-label="Wire Transfer"]');
     await wireOption.waitFor({ state: 'attached', timeout: 5000 });
     await wireOption.click();
     await humanDelay(800, 1500);
   }
 
-  // Enter credits amount
-  // Deposit modal: single number input inside .input-group
-  // Correction modal: two number inputs — "Correction Payment Amount" (index 0) and "Enter Correction Amount" (index 1)
   await humanMouseMove(page);
   let creditsInput;
   if (transactionType === 'correction') {
@@ -105,51 +149,61 @@ async function fillDepositModal(page, credits, transactionType = 'deposit') {
   await creditsInput.fill(String(credits));
   await humanDelay(800, 1500);
 
-  // Click submit button in the modal footer
   await humanMouseMove(page);
   const modal = page.locator('.modal.show').first();
 
   if (transactionType === 'correction') {
-    // Correction modal: submit button says "Correct" and submits the form directly
-    const correctBtn = modal.locator('.modal-footer button:has-text("Correct")');
+    const correctBtn = await findElement(modal, [
+      '.modal-footer button:has-text("Correct")',
+      '.modal-footer button.btn-primary',
+      'button[type="submit"]',
+    ], 'Correct button');
     await correctBtn.click();
     await humanDelay(1500, 3000);
   } else {
-    // Deposit modal: "Deposit" button then "Confirm Deposit" popup
-    const depositBtn = modal.locator('.modal-footer button:has-text("Deposit")');
+    const depositBtn = await findElement(modal, [
+      '.modal-footer button:has-text("Deposit")',
+      '.modal-footer button.btn-primary',
+      'button[type="submit"]',
+    ], 'Deposit button');
     await depositBtn.click();
     await humanDelay(1500, 3000);
 
-    const confirmBtn = page.locator('button:has-text("Confirm Deposit")').first();
-    await confirmBtn.waitFor({ state: 'attached', timeout: 10000 });
+    const confirmBtn = await findElement(page, [
+      'button:has-text("Confirm Deposit")',
+      '.swal2-confirm',
+      'button.btn-primary:has-text("Confirm")',
+    ], 'Confirm Deposit button');
     await humanDelay(1000, 2000);
     await confirmBtn.click();
   }
 
-  // Wait for success
   try {
     await page.waitForSelector('.toast-success, .alert-success, .swal2-success, [class*="success"]', { timeout: 15000 });
     return true;
   } catch {
     const modalStillOpen = await form.isVisible().catch(() => false);
-    if (!modalStillOpen) return true; // Modal closed = success
+    if (!modalStillOpen) return true;
+    await captureFailure(page, jobId, 'DEPOSIT_CONFIRM_FAILED');
     throw new Error('Deposit confirmation did not complete');
   }
 }
 
-// Load credits to a vendor account via Vendors Overview page
-async function loadVendor(page, account, credits, transactionType = 'deposit') {
-  // Navigate to Vendors Overview — use domcontentloaded since networkidle
-  // never resolves (Play777 has persistent connections/websockets)
+async function navigateToVendorsAndWait(page, jobId = 0) {
   await page.goto(VENDORS_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.setViewportSize({ width: 1920, height: 1080 });
   await humanDelay(5000, 8000);
 
-  // Wait for table to be populated
-  await page.locator('table tbody tr').first().waitFor({ state: 'attached', timeout: 60000 });
-  await humanDelay(3000, 5000);
+  try {
+    await page.locator('table tbody tr').first().waitFor({ state: 'attached', timeout: 60000 });
+  } catch {
+    await captureFailure(page, jobId, 'VENDORS_TABLE_EMPTY');
+    throw new Error('Vendors table did not load within 60 seconds');
+  }
+  await humanDelay(2000, 3000);
+}
 
-  // Find the vendor row by agent ID using evaluate (CSS :has() doesn't work in CDP)
+async function findVendorRow(page, operatorId, username, jobId = 0) {
   const rowIndex = await page.evaluate((opId) => {
     const rows = document.querySelectorAll('table tbody tr');
     for (let i = 0; i < rows.length; i++) {
@@ -157,53 +211,35 @@ async function loadVendor(page, account, credits, transactionType = 'deposit') {
       if (link) return i;
     }
     return -1;
-  }, account.operatorId);
+  }, operatorId);
 
   if (rowIndex === -1) {
-    throw new Error(`Vendor ${account.username} (${account.operatorId}) not found on vendors page`);
+    await captureFailure(page, jobId, 'VENDOR_ROW_NOT_FOUND');
+    throw new Error(`Vendor ${username} (${operatorId}) not found on vendors page`);
   }
 
-  const row = page.locator('table tbody tr').nth(rowIndex);
+  return page.locator('table tbody tr').nth(rowIndex);
+}
+
+async function loadVendor(page, account, credits, transactionType = 'deposit', jobId = 0) {
+  await navigateToVendorsAndWait(page, jobId);
+  const row = await findVendorRow(page, account.operatorId, account.username, jobId);
   await row.scrollIntoViewIfNeeded();
   await humanDelay(500, 1000);
 
-  // Click $ button (index 1) on the vendor row
   const actionButtons = await row.locator('td').last().locator('button.btn-icon').all();
   logger.info('Play777: Loading credits to vendor', { credits, username: account.username, operatorId: account.operatorId });
   await humanMouseMove(page);
   await actionButtons[1].click();
   await humanDelay(1500, 3000);
 
-  await fillDepositModal(page, credits, transactionType);
+  await fillDepositModal(page, credits, transactionType, jobId);
   logger.info('Play777: Successfully loaded credits to vendor', { credits, username: account.username });
 }
 
-// Load credits to an operator under a vendor via the operators drawer
-async function loadOperator(page, vendor, operator, credits, transactionType = 'deposit') {
-  // Navigate to Vendors Overview
-  await page.goto(VENDORS_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  await page.setViewportSize({ width: 1920, height: 1080 });
-  await humanDelay(5000, 8000);
-
-  // Wait for table to be populated
-  await page.locator('table tbody tr').first().waitFor({ state: 'attached', timeout: 60000 });
-  await humanDelay(3000, 5000);
-
-  // Find the vendor row using evaluate
-  const vendorRowIndex = await page.evaluate((opId) => {
-    const rows = document.querySelectorAll('table tbody tr');
-    for (let i = 0; i < rows.length; i++) {
-      const link = rows[i].querySelector(`a[onclick="return showAgentDrawer(${opId})"]`);
-      if (link) return i;
-    }
-    return -1;
-  }, vendor.operatorId);
-
-  if (vendorRowIndex === -1) {
-    throw new Error(`Vendor ${vendor.username} (${vendor.operatorId}) not found on vendors page`);
-  }
-
-  const vendorRow = page.locator('table tbody tr').nth(vendorRowIndex);
+async function loadOperator(page, vendor, operator, credits, transactionType = 'deposit', jobId = 0) {
+  await navigateToVendorsAndWait(page, jobId);
+  const vendorRow = await findVendorRow(page, vendor.operatorId, vendor.username, jobId);
   await vendorRow.scrollIntoViewIfNeeded();
   await humanDelay(500, 1000);
 
@@ -213,46 +249,50 @@ async function loadOperator(page, vendor, operator, credits, transactionType = '
   await vendorButtons[4].click();
   await humanDelay(3000, 5000);
 
-  // Find the operator row — the people icon expands an inline operators table
-  // Use .last() to match the one in the expanded section, not the main vendor table
   const operatorRow = page.locator(`tr:has(a[onclick="return showAgentDrawer(${operator.operatorId})"])`).last();
-  await operatorRow.waitFor({ state: 'attached', timeout: 30000 });
+  try {
+    await operatorRow.waitFor({ state: 'attached', timeout: 30000 });
+  } catch {
+    await captureFailure(page, jobId, 'OPERATOR_ROW_NOT_FOUND');
+    throw new Error(`Operator ${operator.username} (${operator.operatorId}) not found`);
+  }
   await operatorRow.scrollIntoViewIfNeeded();
   await humanDelay(500, 1000);
 
-  // Click $ button (index 1) on the operator row
   const operatorButtons = await operatorRow.locator('td').last().locator('button.btn-icon').all();
   logger.info('Play777: Loading credits to operator', { credits, username: operator.username, operatorId: operator.operatorId });
   await humanMouseMove(page);
   await operatorButtons[1].click();
   await humanDelay(1500, 3000);
 
-  await fillDepositModal(page, credits, transactionType);
+  await fillDepositModal(page, credits, transactionType, jobId);
   logger.info('Play777: Successfully loaded credits to operator', { credits, username: operator.username });
 }
 
-const LOAD_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes max per load operation
-
-// Main entry point — loads credits to a single account
-// For operators, pass parentVendor with the vendor's info
-// transactionType: 'deposit' (default) or 'correction'
-async function loadCredits(account, credits, parentVendor, transactionType = 'deposit') {
+async function loadCredits(account, credits, parentVendor, transactionType = 'deposit', jobId = 0) {
   let session;
 
   const doLoad = async () => {
     session = await getBrowserContext('play777');
     const context = session.context;
+
+    await restoreSession(context, 'play777');
+
     const page = await context.newPage();
     await page.setViewportSize({ width: 1920, height: 1080 });
 
     const loggedIn = await ensureLoggedIn(page);
     if (!loggedIn) throw new Error('Failed to login to Play777');
 
+    await saveSession(context, 'play777');
+
     if (parentVendor) {
-      await loadOperator(page, parentVendor, account, credits, transactionType);
+      await loadOperator(page, parentVendor, account, credits, transactionType, jobId);
     } else {
-      await loadVendor(page, account, credits, transactionType);
+      await loadVendor(page, account, credits, transactionType, jobId);
     }
+
+    await saveSession(context, 'play777');
 
     return { success: true, platform: 'PLAY777', account: account.username, credits };
   };
