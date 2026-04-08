@@ -6,6 +6,7 @@ const multer = require('multer');
 const quickbooks = require('../services/quickbooks');
 const telegram = require('../services/telegram');
 const autoloader = require('../services/autoloader');
+const { validateInvoice, validateCorrection } = require('../services/validator');
 const prisma = require('../db/client');
 
 const uploadsDir = path.join(__dirname, '..', '..', 'uploads');
@@ -39,6 +40,18 @@ router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) =>
 
     const isWire = method === 'Wire';
     const methodLabel = isWire ? 'Wire' : method === 'ACH' ? 'ACH (1%)' : 'Credit/Debit (3%)';
+
+    const validation = validateInvoice({
+      vendor,
+      method: methodLabel,
+      baseAmount: Number(baseAmount),
+      feeAmount: Number(feeAmount),
+      totalAmount: Number(totalAmount),
+      allocations: allocations.map((a) => ({ accountId: a.accountId, dollarAmount: Number(a.dollarAmount), credits: a.credits })),
+    });
+    if (!validation.valid) {
+      return res.status(400).json({ error: validation.error });
+    }
 
     // Create invoice in DB
     const invoice = await prisma.invoice.create({
@@ -148,11 +161,11 @@ router.post('/submit-correction', async (req, res) => {
       return res.status(400).json({ error: 'Source account not found' });
     }
 
-    // Calculate total credits needed
-    const totalCredits = corrections.reduce((sum, c) => sum + c.credits, 0);
-    if (totalCredits <= 0) {
-      return res.status(400).json({ error: 'No credits to correct' });
+    const validation = validateCorrection({ vendor, sourceAccountId, corrections });
+    if (!validation.valid) {
+      return res.status(400).json({ error: validation.error });
     }
+    const totalCredits = corrections.reduce((sum, c) => sum + c.credits, 0);
 
     // Create invoice record for the correction
     const invoice = await prisma.invoice.create({
