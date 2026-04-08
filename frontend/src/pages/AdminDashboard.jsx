@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import InvoicePipeline from '../components/InvoicePipeline';
+import EventTimeline from '../components/EventTimeline';
 
 const STATUSES = ['REQUESTED', 'PENDING', 'PAID', 'LOADING', 'LOADED'];
 
@@ -16,6 +17,7 @@ export default function AdminDashboard() {
   const [view, setView] = useState('pipeline');
   const [vendorStats, setVendorStats] = useState([]);
   const [corrections, setCorrections] = useState([]);
+  const [selectedInvoiceEvents, setSelectedInvoiceEvents] = useState(null);
   const navigate = useNavigate();
 
   function handleAuthError(err) {
@@ -194,6 +196,7 @@ export default function AdminDashboard() {
             onConfirmWire={handleConfirmWire}
             onTriggerLoad={handleTriggerLoad}
             onResendEmail={handleResendEmail}
+            onShowEvents={(id) => setSelectedInvoiceEvents(id)}
           />
         ) : view === 'corrections' ? (
           <CorrectionLog corrections={corrections} />
@@ -205,9 +208,18 @@ export default function AdminDashboard() {
             onConfirmWire={handleConfirmWire}
             onTriggerLoad={handleTriggerLoad}
             onResendEmail={handleResendEmail}
+            onShowEvents={(id) => setSelectedInvoiceEvents(id)}
           />
         )}
       </main>
+
+      {selectedInvoiceEvents && (
+        <EventTimeline
+          invoiceId={selectedInvoiceEvents}
+          token={localStorage.getItem('admin_token')}
+          onClose={() => setSelectedInvoiceEvents(null)}
+        />
+      )}
     </div>
   );
 }
@@ -221,7 +233,7 @@ function Stat({ label, value, color }) {
   );
 }
 
-function ListView({ invoices, onConfirmWire, onTriggerLoad, onResendEmail }) {
+function ListView({ invoices, onConfirmWire, onTriggerLoad, onResendEmail, onShowEvents }) {
   if (invoices.length === 0) {
     return <p className="text-gray-500 text-center py-12">No invoices yet.</p>;
   }
@@ -290,6 +302,9 @@ function ListView({ invoices, onConfirmWire, onTriggerLoad, onResendEmail }) {
                       Resend
                     </button>
                   )}
+                  <button onClick={() => onShowEvents(invoice.id)} className="text-xs px-2 py-1 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 rounded transition">
+                    Events
+                  </button>
                 </div>
               </td>
             </tr>

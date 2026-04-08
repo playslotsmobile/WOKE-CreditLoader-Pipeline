@@ -13,7 +13,7 @@ function timeAgo(dateStr) {
   return `${days}d`;
 }
 
-export default function InvoiceCard({ invoice, allocations, onConfirmWire, onTriggerLoad, onResendEmail }) {
+export default function InvoiceCard({ invoice, allocations, onConfirmWire, onTriggerLoad, onResendEmail, onShowEvents }) {
   const isPending = invoice.status === 'PENDING';
   const isFailed = invoice.status === 'FAILED';
   const isPaid = invoice.status === 'PAID';
@@ -88,6 +88,15 @@ export default function InvoiceCard({ invoice, allocations, onConfirmWire, onTri
           className="mt-2 w-full text-xs font-semibold py-2 rounded-lg bg-gray-500/10 border border-gray-500/30 text-gray-400 hover:bg-gray-500/20 transition"
         >
           Resend Email
+        </button>
+      )}
+
+      {onShowEvents && (
+        <button
+          onClick={() => onShowEvents(invoice.id)}
+          className="mt-2 w-full text-xs font-semibold py-1.5 rounded-lg text-[#2563eb] hover:bg-[#2563eb]/10 transition"
+        >
+          Events
         </button>
       )}
     </div>
