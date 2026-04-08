@@ -237,6 +237,36 @@ router.get('/invoices/:id/events', async (req, res) => {
   }
 });
 
+// Submit 2FA code for Play777 login
+router.post('/2fa-code', async (req, res) => {
+  try {
+    const { code } = req.body;
+    if (!code) return res.status(400).json({ error: 'Code is required' });
+
+    await prisma.setting.upsert({
+      where: { key: 'play777_2fa_code' },
+      update: { value: String(code) },
+      create: { key: 'play777_2fa_code', value: String(code) },
+    });
+
+    logger.info('2FA code submitted via dashboard', { codeLength: code.length });
+    res.json({ success: true, message: '2FA code submitted — browser will pick it up within 5 seconds' });
+  } catch (err) {
+    logger.error('2FA code submission failed', { error: err });
+    res.status(500).json({ error: 'Failed to submit 2FA code' });
+  }
+});
+
+// Check if 2FA is currently needed
+router.get('/2fa-status', async (req, res) => {
+  try {
+    const setting = await prisma.setting.findUnique({ where: { key: 'play777_2fa_code' } });
+    res.json({ needed: false });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to check 2FA status' });
+  }
+});
+
 // Vendor stats (real data from DB)
 router.get('/vendor-stats', async (req, res) => {
   try {
