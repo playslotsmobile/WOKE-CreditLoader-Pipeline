@@ -1,8 +1,9 @@
 const { chromium } = require('playwright');
 const path = require('path');
+const { logger } = require('./logger');
 
 // AdsPower API config
-const ADSPOWER_API = 'http://local.adspower.net:50325';
+const ADSPOWER_API = process.env.ADSPOWER_API_URL || 'http://127.0.0.1:50325';
 const ADSPOWER_TOKEN = process.env.ADSPOWER_API_KEY;
 
 // AdsPower profile IDs per platform
@@ -84,7 +85,7 @@ async function getBrowserContext(platform) {
 
   const wsUrl = data.data.ws.puppeteer;
   const debugPort = data.data.debug_port;
-  console.log(`${platform}: AdsPower profile launched (port ${debugPort})`);
+  logger.info('AdsPower profile launched', { platform, debugPort });
 
   // Connect Playwright via CDP
   const browser = await chromium.connectOverCDP(`http://127.0.0.1:${debugPort}`);
@@ -100,7 +101,7 @@ async function closeBrowser(session) {
     await fetch(stopUrl, {
       headers: { 'Authorization': `Bearer ${ADSPOWER_TOKEN}` },
     }).catch(() => {});
-    console.log('AdsPower profile closed.');
+    logger.info('AdsPower profile closed');
   }
 }
 

@@ -9,6 +9,7 @@ const webhookRoutes = require('./routes/webhooks');
 const adminRoutes = require('./routes/admin');
 const { startWebhookProcessor } = require('./services/webhookProcessor');
 const { startHealthChecks } = require('./services/healthDigest');
+const { logger } = require('./services/logger');
 
 const app = express();
 app.use(cors());
@@ -54,7 +55,7 @@ app.get('/api/vendors/:slug', async (req, res) => {
       })),
     });
   } catch (err) {
-    console.error('Vendor lookup error:', err);
+    logger.error('Vendor lookup error', { error: err });
     res.status(500).json({ error: 'Failed to load vendor' });
   }
 });
@@ -108,10 +109,10 @@ app.get('/api/qb-callback', async (req, res) => {
       create: { key: 'qb_realm_id', value: realmId },
     });
 
-    console.log('QB OAuth complete — refresh token and realm ID saved to DB');
+    logger.info('QB OAuth complete — refresh token and realm ID saved to DB');
     res.send('QuickBooks connected successfully! Tokens saved. You can close this tab.');
   } catch (err) {
-    console.error('QB OAuth error:', err);
+    logger.error('QB OAuth error', { error: err });
     res.status(500).send('OAuth failed: ' + err.message);
   }
 });
@@ -136,16 +137,16 @@ async function expireStaleInvoices() {
       data: { status: 'FAILED' },
     });
     if (expired.count > 0) {
-      console.log(`Expired ${expired.count} stale REQUESTED invoices older than 7 days`);
+      logger.info('Expired stale REQUESTED invoices', { count: expired.count });
     }
   } catch (err) {
-    console.error('Invoice expiry check failed:', err.message);
+    logger.error('Invoice expiry check failed', { error: err });
   }
 }
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Backend running on http://localhost:${PORT}`);
+  logger.info('Backend running', { port: PORT });
   expireStaleInvoices(); // Check on startup
   setInterval(expireStaleInvoices, 60 * 60 * 1000); // Check every hour
   startWebhookProcessor();

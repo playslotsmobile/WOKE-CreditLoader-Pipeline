@@ -1,4 +1,5 @@
 const TelegramBot = require('node-telegram-bot-api');
+const { logger } = require('./logger');
 
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: false });
 const ADMIN_CHAT_ID = process.env.TELEGRAM_ADMIN_CHAT_ID;
@@ -120,7 +121,7 @@ async function sendVendorPaid(vendor, invoice) {
       `💰 Payment Received\n\nYour payment of ${fmt(invoice.totalAmount)} has been received. Credits are being loaded.`
     );
   } catch (err) {
-    console.error('Telegram vendor paid notification failed:', err.message);
+    logger.error('Telegram vendor paid notification failed', { error: err });
   }
 }
 
@@ -132,7 +133,7 @@ async function sendVendorFailed(vendor, invoice) {
       `⚠️ Loading Issue\n\nThere was an issue loading your credits for invoice #${invoice.id}. Our team has been notified and will resolve this shortly.`
     );
   } catch (err) {
-    console.error('Telegram vendor failed notification failed:', err.message);
+    logger.error('Telegram vendor failed notification failed', { error: err });
   }
 }
 

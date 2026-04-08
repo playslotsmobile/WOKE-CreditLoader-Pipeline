@@ -1,4 +1,5 @@
 const { getBrowserContext, closeBrowser, humanDelay, humanType, humanMouseMove } = require('./browser');
+const { logger } = require('./logger');
 
 const SHOP_URL = 'https://river-pay.com/agent/show';
 const LOGIN_URL = 'https://river-pay.com/office/login';
@@ -10,11 +11,11 @@ async function ensureLoggedIn(page) {
   await humanDelay(2000, 4000);
 
   if (!page.url().includes('/login')) {
-    console.log('IConnect: Already logged in');
+    logger.info('IConnect: Already logged in');
     return true;
   }
 
-  console.log('IConnect: Session expired, logging in...');
+  logger.info('IConnect: Session expired, logging in...');
   await humanDelay(500, 1200);
   await humanType(page, '#LoginForm_login', USERNAME);
   await humanDelay(400, 900);
@@ -25,10 +26,10 @@ async function ensureLoggedIn(page) {
 
   try {
     await page.waitForURL((url) => !url.toString().includes('/login'), { timeout: 15000 });
-    console.log('IConnect: Login successful');
+    logger.info('IConnect: Login successful');
     return true;
   } catch (e) {
-    console.error('IConnect: Login failed —', e.message);
+    logger.error('IConnect: Login failed', { error: e });
     return false;
   }
 }
@@ -55,7 +56,7 @@ async function loadCredits(account, credits) {
       await humanDelay(2000, 4000);
     }
 
-    console.log(`IConnect: Loading ${credits} credits to ${account.username}`);
+    logger.info('IConnect: Loading credits', { credits, username: account.username });
 
     const depositBtn = page.locator(`button[onclick*="'${account.username}'"]`);
     const btnCount = await depositBtn.count();
@@ -70,7 +71,7 @@ async function loadCredits(account, credits) {
     }
 
     const [, agentId, login, parentId, balance] = match;
-    console.log(`IConnect: Agent ${login} (ID: ${agentId}), balance: ${balance}`);
+    logger.info('IConnect: Agent found', { login, agentId, balance });
 
     await humanMouseMove(page);
     await humanDelay(500, 1200);
@@ -102,7 +103,7 @@ async function loadCredits(account, credits) {
     await humanDelay(2000, 4000);
 
     if (page.url().includes('/agent/show')) {
-      console.log(`IConnect: Successfully loaded ${credits} credits to ${account.username}`);
+      logger.info('IConnect: Successfully loaded credits', { credits, username: account.username });
       return { success: true, platform: 'ICONNECT', account: account.username, credits };
     } else {
       throw new Error('Page did not return to /agent/show after deposit');
@@ -118,7 +119,7 @@ async function loadCredits(account, credits) {
     ]);
     return result;
   } catch (err) {
-    console.error('IConnect load error:', err.message);
+    logger.error('IConnect load error', { error: err });
     return { success: false, platform: 'ICONNECT', account: account.username, error: err.message };
   } finally {
     if (session) {

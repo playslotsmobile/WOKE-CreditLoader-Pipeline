@@ -8,6 +8,7 @@ const telegram = require('../services/telegram');
 const autoloader = require('../services/autoloader');
 const { validateInvoice, validateCorrection } = require('../services/validator');
 const prisma = require('../db/client');
+const { logger } = require('../services/logger');
 
 const uploadsDir = path.join(__dirname, '..', '..', 'uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
@@ -106,14 +107,14 @@ router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) =>
 
     // Save wire receipt path if uploaded
     if (req.file) {
-      console.log(`Wire receipt saved: ${req.file.filename}`);
+      logger.info('Wire receipt saved', { filename: req.file.filename });
       // Backup wire receipt
       const backupDir = '/var/backups/creditloader/receipts';
       try {
         fs.mkdirSync(backupDir, { recursive: true });
         fs.copyFileSync(req.file.path, path.join(backupDir, req.file.filename));
       } catch (backupErr) {
-        console.error('Wire receipt backup failed:', backupErr.message);
+        logger.error('Wire receipt backup failed', { error: backupErr });
       }
     }
 
@@ -121,7 +122,7 @@ router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) =>
       try {
         await telegram.sendWireSubmitted(vendorData, invoiceData, enrichedAllocations);
       } catch (err) {
-        console.error('Telegram wire notification failed:', err.message);
+        logger.error('Telegram wire notification failed', { error: err });
       }
     } else {
       // Create QB invoice
@@ -134,21 +135,21 @@ router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) =>
         });
         invoiceData.qbInvoiceId = qbId;
       } catch (err) {
-        console.error('QB invoice creation failed:', err.message);
+        logger.error('QB invoice creation failed', { error: err });
         invoiceData.qbInvoiceId = 'QB-PENDING';
       }
 
       try {
         await telegram.sendInvoiceSent(vendorData, invoiceData, enrichedAllocations);
       } catch (err) {
-        console.error('Telegram invoice notification failed:', err.message);
+        logger.error('Telegram invoice notification failed', { error: err });
       }
     }
 
-    console.log('Invoice saved:', invoice.id);
+    logger.info('Invoice saved', { invoiceId: invoice.id });
     res.json({ success: true, invoiceId: invoice.id, qbInvoiceId: invoiceData.qbInvoiceId });
   } catch (err) {
-    console.error('Submit invoice error:', err);
+    logger.error('Submit invoice error', { error: err });
     res.status(500).json({ error: 'Failed to submit invoice' });
   }
 });
@@ -218,18 +219,18 @@ router.post('/submit-correction', async (req, res) => {
         `📋 Correction Request from ${vendor.name}\n\nSource: ${sourceAccount.username} (${sourceAccount.operatorId})\n\n${correctionDetails}\n\nTotal: ${totalCredits} credits\nInvoice #${invoice.id}`
       );
     } catch (err) {
-      console.error('Telegram correction notification failed:', err.message);
+      logger.error('Telegram correction notification failed', { error: err });
     }
 
-    console.log('Correction saved:', invoice.id);
+    logger.info('Correction saved', { invoiceId: invoice.id });
     res.json({ success: true, invoiceId: invoice.id });
 
     // Auto-trigger correction load immediately
     autoloader.processInvoice(invoice.id).catch((err) => {
-      console.error('Correction auto-load failed:', err.message);
+      logger.error('Correction auto-load failed', { error: err });
     });
   } catch (err) {
-    console.error('Submit correction error:', err);
+    logger.error('Submit correction error', { error: err });
     res.status(500).json({ error: 'Failed to submit correction' });
   }
 });

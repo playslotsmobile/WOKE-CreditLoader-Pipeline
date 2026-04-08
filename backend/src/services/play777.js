@@ -1,5 +1,6 @@
 const { getBrowserContext, closeBrowser, humanDelay, humanType, humanMouseMove } = require('./browser');
 const telegram = require('./telegram');
+const { logger } = require('./logger');
 
 const DASHBOARD_URL = 'https://pna.play777games.com/dashboard';
 const VENDORS_URL = 'https://pna.play777games.com/vendors-overview';
@@ -11,11 +12,11 @@ async function ensureLoggedIn(page) {
   await humanDelay(2000, 4000);
 
   if (!page.url().includes('/login')) {
-    console.log('Play777: Already logged in');
+    logger.info('Play777: Already logged in');
     return true;
   }
 
-  console.log('Play777: Session expired, logging in...');
+  logger.info('Play777: Session expired, logging in...');
   await humanDelay(500, 1200);
   await humanType(page, 'input[name="username"]', USERNAME);
   await humanDelay(400, 900);
@@ -35,23 +36,23 @@ async function ensureLoggedIn(page) {
 
   try {
     await page.waitForURL((url) => !url.toString().includes('/login'), { timeout: 15000 });
-    console.log('Play777: Login successful');
+    logger.info('Play777: Login successful');
     return true;
   } catch (e) {
     const content = await page.content();
     if (content.includes('verification') || content.includes('2fa') || content.includes('code')) {
-      console.log('Play777: 2FA triggered — alerting admin');
+      logger.warn('Play777: 2FA triggered — alerting admin');
       try {
         await telegram.bot.sendMessage(
           process.env.TELEGRAM_ADMIN_CHAT_ID,
           '🔐 Play777 requires 2FA. Please log in manually in AdsPower and restart.'
         );
       } catch (err) {
-        console.error('Failed to send 2FA alert:', err.message);
+        logger.error('Failed to send 2FA alert', { error: err });
       }
       return false;
     }
-    console.error('Play777: Login failed —', e.message);
+    logger.error('Play777: Login failed', { error: e });
     return false;
   }
 }
@@ -168,13 +169,13 @@ async function loadVendor(page, account, credits, transactionType = 'deposit') {
 
   // Click $ button (index 1) on the vendor row
   const actionButtons = await row.locator('td').last().locator('button.btn-icon').all();
-  console.log(`Play777: Loading ${credits} credits to vendor ${account.username} (${account.operatorId})`);
+  logger.info('Play777: Loading credits to vendor', { credits, username: account.username, operatorId: account.operatorId });
   await humanMouseMove(page);
   await actionButtons[1].click();
   await humanDelay(1500, 3000);
 
   await fillDepositModal(page, credits, transactionType);
-  console.log(`Play777: Successfully loaded ${credits} credits to vendor ${account.username}`);
+  logger.info('Play777: Successfully loaded credits to vendor', { credits, username: account.username });
 }
 
 // Load credits to an operator under a vendor via the operators drawer
@@ -207,7 +208,7 @@ async function loadOperator(page, vendor, operator, credits, transactionType = '
   await humanDelay(500, 1000);
 
   const vendorButtons = await vendorRow.locator('td').last().locator('button.btn-icon').all();
-  console.log(`Play777: Opening operators for vendor ${vendor.username}`);
+  logger.info('Play777: Opening operators for vendor', { username: vendor.username });
   await humanMouseMove(page);
   await vendorButtons[4].click();
   await humanDelay(3000, 5000);
@@ -221,13 +222,13 @@ async function loadOperator(page, vendor, operator, credits, transactionType = '
 
   // Click $ button (index 1) on the operator row
   const operatorButtons = await operatorRow.locator('td').last().locator('button.btn-icon').all();
-  console.log(`Play777: Loading ${credits} credits to operator ${operator.username} (${operator.operatorId})`);
+  logger.info('Play777: Loading credits to operator', { credits, username: operator.username, operatorId: operator.operatorId });
   await humanMouseMove(page);
   await operatorButtons[1].click();
   await humanDelay(1500, 3000);
 
   await fillDepositModal(page, credits, transactionType);
-  console.log(`Play777: Successfully loaded ${credits} credits to operator ${operator.username}`);
+  logger.info('Play777: Successfully loaded credits to operator', { credits, username: operator.username });
 }
 
 const LOAD_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes max per load operation
@@ -265,7 +266,7 @@ async function loadCredits(account, credits, parentVendor, transactionType = 'de
     ]);
     return result;
   } catch (err) {
-    console.error('Play777 load error:', err.message);
+    logger.error('Play777 load error', { error: err });
     return { success: false, platform: 'PLAY777', account: account.username, error: err.message };
   } finally {
     if (session) {

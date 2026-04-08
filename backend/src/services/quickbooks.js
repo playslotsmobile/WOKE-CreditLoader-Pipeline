@@ -1,4 +1,5 @@
 const prisma = require('../db/client');
+const { logger } = require('./logger');
 
 let accessToken = null;
 let tokenExpiry = 0;
@@ -22,9 +23,9 @@ async function saveRefreshToken(token) {
       update: { value: token },
       create: { key: 'qb_refresh_token', value: token },
     });
-    console.log('QB refresh token saved to DB.');
+    logger.info('QB refresh token saved to DB');
   } catch (err) {
-    console.error('Failed to save refresh token to DB:', err.message);
+    logger.error('Failed to save refresh token to DB', { error: err });
   }
 }
 
@@ -164,9 +165,9 @@ async function createInvoice(vendor, invoice, allocations) {
   // Explicitly send the invoice email
   try {
     await sendInvoiceEmail(createdInvoice.Id, vendor.email);
-    console.log(`QB: Invoice ${createdInvoice.Id} email sent to ${vendor.email}`);
+    logger.info('QB invoice email sent', { invoiceId: createdInvoice.Id, email: vendor.email });
   } catch (err) {
-    console.error(`QB: Failed to send invoice email for ${createdInvoice.Id}:`, err.message);
+    logger.error('QB failed to send invoice email', { invoiceId: createdInvoice.Id, error: err });
   }
 
   return createdInvoice;
