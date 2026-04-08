@@ -43,6 +43,7 @@ model VendorAccount {
   vendor             Vendor              @relation(fields: [vendorId], references: [id])
   invoiceAllocations InvoiceAllocation[]
   loadJobs           LoadJob[]
+  loadSteps          LoadStep[]
 
   @@map("vendor_accounts")
 }
@@ -113,6 +114,8 @@ model LoadJob {
 
   invoice       Invoice       @relation(fields: [invoiceId], references: [id])
   vendorAccount VendorAccount @relation(fields: [vendorAccountId], references: [id])
+  loadSteps     LoadStep[]
+  loadEvents    LoadEvent[]
 
   @@index([invoiceId])
   @@index([vendorAccountId])
@@ -143,4 +146,54 @@ model Setting {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("settings")
+}
+
+model LoadStep {
+  id             Int      @id @default(autoincrement())
+  loadJobId      Int      @map("load_job_id")
+  step           String
+  accountId      Int      @map("account_id")
+  credits        Int
+  status         String   @default("PENDING")
+  balanceBefore  Int?     @map("balance_before")
+  balanceAfter   Int?     @map("balance_after")
+  screenshotPath String?  @map("screenshot_path")
+  error          String?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  loadJob       LoadJob       @relation(fields: [loadJobId], references: [id])
+  vendorAccount VendorAccount @relation(fields: [accountId], references: [id])
+
+  @@index([loadJobId])
+  @@map("load_steps")
+}
+
+model LoadEvent {
+  id             Int      @id @default(autoincrement())
+  loadJobId      Int      @map("load_job_id")
+  step           String
+  status         String
+  metadata       Json?
+  screenshotPath String?  @map("screenshot_path")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  loadJob LoadJob @relation(fields: [loadJobId], references: [id])
+
+  @@index([loadJobId])
+  @@map("load_events")
+}
+
+model WebhookEvent {
+  id          Int       @id @default(autoincrement())
+  source      String
+  eventType   String    @map("event_type")
+  payload     Json
+  status      String    @default("RECEIVED")
+  error       String?
+  attempts    Int       @default(0)
+  receivedAt  DateTime  @default(now()) @map("received_at")
+  processedAt DateTime? @map("processed_at")
+
+  @@index([status])
+  @@map("webhook_events")
 }
