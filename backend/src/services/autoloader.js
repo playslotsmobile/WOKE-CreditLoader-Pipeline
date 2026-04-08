@@ -2,10 +2,21 @@ const play777 = require('./play777');
 const iconnect = require('./iconnect');
 const telegram = require('./telegram');
 const prisma = require('../db/client');
+const { logger } = require('./logger');
 
 const DRY_RUN = process.env.DRY_RUN === 'true';
 const MAX_RETRIES = 3;
 const RETRY_DELAYS = [30000, 60000, 120000]; // 30s, 60s, 2min
+
+async function emitEvent(loadJobId, step, status, metadata = null, screenshotPath = null) {
+  try {
+    await prisma.loadEvent.create({
+      data: { loadJobId, step, status, metadata, screenshotPath },
+    });
+  } catch (err) {
+    logger.error('Failed to emit LoadEvent', { loadJobId, step, error: err });
+  }
+}
 
 // Process all load jobs for an invoice
 async function processInvoice(invoiceId, retryCount = 0) {
@@ -44,8 +55,12 @@ async function processInvoice(invoiceId, retryCount = 0) {
       where: { id: invoiceId },
       data: { status: 'LOADED', loadedAt: new Date() },
     });
-    console.log(`Invoice ${invoiceId}: All loads already completed`);
+    logger.info('All loads already completed', { invoiceId });
     return { invoiceId, results: [], allSuccess: true };
+  }
+
+  for (const job of pendingJobs) {
+    await emitEvent(job.id, 'LOAD_STARTED', 'INFO', { invoiceId, creditsAmount: job.creditsAmount });
   }
 
   const results = [];
@@ -71,11 +86,18 @@ async function processInvoice(invoiceId, retryCount = 0) {
 
     // Step 1: Correct (deduct) total credits from source account
     const totalCorrectionCredits = pendingJobs.reduce((s, j) => s + j.creditsAmount, 0);
-    console.log(`Correction Step 1: Deducting ${totalCorrectionCredits} credits from ${source.username} (${source.operatorId})`);
+    logger.info('Correction Step 1: Deducting credits from source account', {
+      credits: totalCorrectionCredits,
+      sourceAccount: source.username,
+      operatorId: source.operatorId,
+    });
 
     let deductResult;
     if (DRY_RUN) {
-      console.log(`[DRY RUN] Would correct ${totalCorrectionCredits} credits from ${source.username}`);
+      logger.info('[DRY RUN] Would correct credits from source account', {
+        credits: totalCorrectionCredits,
+        sourceAccount: source.username,
+      });
       deductResult = { success: true };
     } else {
       deductResult = await play777.loadCredits(
@@ -87,19 +109,38 @@ async function processInvoice(invoiceId, retryCount = 0) {
     }
 
     if (!deductResult.success) {
-      console.error(`Correction failed: Could not deduct from ${source.username}: ${deductResult.error}`);
+      logger.error('Correction failed: Could not deduct from source account', {
+        sourceAccount: source.username,
+        error: deductResult.error,
+      });
+      await emitEvent(pendingJobs[0].id, 'CORRECTION_DEDUCT_FAILED', 'FAILED', {
+        sourceAccount: source.username,
+        credits: totalCorrectionCredits,
+        error: deductResult.error,
+      });
       await markAllJobsFailed(pendingJobs, `Failed to deduct from ${source.username}: ${deductResult.error}`);
       await prisma.invoice.update({ where: { id: invoiceId }, data: { status: 'FAILED' } });
       return { invoiceId, results: [deductResult], allSuccess: false };
     }
 
-    console.log(`Correction Step 1 complete: ${totalCorrectionCredits} credits deducted from ${source.username}`);
+    logger.info('Correction Step 1 complete: credits deducted', {
+      credits: totalCorrectionCredits,
+      sourceAccount: source.username,
+    });
+    await emitEvent(pendingJobs[0].id, 'CORRECTION_DEDUCT_OK', 'SUCCESS', {
+      sourceAccount: source.username,
+      credits: totalCorrectionCredits,
+    });
     await new Promise((r) => setTimeout(r, 3000 + Math.random() * 5000));
 
     // Step 2: Deposit credits to each target vendor
     for (const job of pendingJobs) {
       const account = job.vendorAccount;
-      console.log(`Correction Step 2: Depositing ${job.creditsAmount} credits to ${account.username} (${account.operatorId})`);
+      logger.info('Correction Step 2: Depositing credits to target account', {
+        credits: job.creditsAmount,
+        account: account.username,
+        operatorId: account.operatorId,
+      });
 
       const result = await executeLoad(job, 'PLAY777', account, job.creditsAmount);
       results.push(result);
@@ -116,7 +157,11 @@ async function processInvoice(invoiceId, retryCount = 0) {
     // Process Play777
     for (const job of play777Jobs) {
       const account = job.vendorAccount;
-      console.log(`Loading Play777: ${account.username} (${account.operatorId}) — ${job.creditsAmount} credits`);
+      logger.info('Loading Play777 account', {
+        account: account.username,
+        operatorId: account.operatorId,
+        credits: job.creditsAmount,
+      });
 
       const result = await executeLoad(job, 'PLAY777', account, job.creditsAmount);
       results.push(result);
@@ -144,7 +189,11 @@ async function processInvoice(invoiceId, retryCount = 0) {
             });
           }
 
-          console.log(`Chain load: ${job.creditsAmount} credits to operator ${chainTarget.username} (${chainTarget.operatorId})`);
+          logger.info('Chain load: depositing credits to operator account', {
+            credits: job.creditsAmount,
+            account: chainTarget.username,
+            operatorId: chainTarget.operatorId,
+          });
           await new Promise((r) => setTimeout(r, 3000 + Math.random() * 5000));
 
           const chainResult = await executeLoad(
@@ -163,7 +212,10 @@ async function processInvoice(invoiceId, retryCount = 0) {
     // Process IConnect
     for (const job of iconnectJobs) {
       const account = job.vendorAccount;
-      console.log(`Loading IConnect: ${account.username} — ${job.creditsAmount} credits`);
+      logger.info('Loading IConnect account', {
+        account: account.username,
+        credits: job.creditsAmount,
+      });
 
       const result = await executeLoad(job, 'ICONNECT', account, job.creditsAmount);
       results.push(result);
@@ -182,6 +234,10 @@ async function processInvoice(invoiceId, retryCount = 0) {
       where: { id: invoiceId },
       data: { status: 'LOADED', loadedAt: new Date() },
     });
+
+    for (const job of pendingJobs) {
+      await emitEvent(job.id, 'INVOICE_LOADED', 'SUCCESS', { invoiceId });
+    }
 
     const vendorData = {
       name: invoice.vendor.name,
@@ -208,17 +264,23 @@ async function processInvoice(invoiceId, retryCount = 0) {
     try {
       await telegram.sendLoaded(vendorData, invoiceData, allocations);
     } catch (err) {
-      console.error('Telegram loaded notification failed:', err.message);
+      logger.error('Telegram loaded notification failed', { error: err.message });
     }
 
-    console.log(`Invoice ${invoiceId}: All loads completed successfully`);
+    logger.info('All loads completed successfully', { invoiceId });
   } else {
     const failed = results.filter((r) => !r.success);
     const attempt = retryCount + 1;
 
     if (attempt < MAX_RETRIES) {
       const delayMs = RETRY_DELAYS[retryCount];
-      console.error(`Invoice ${invoiceId}: ${failed.length} loads failed — retrying in ${delayMs / 1000}s (attempt ${attempt}/${MAX_RETRIES})`);
+      logger.error('Loads failed, retrying', {
+        invoiceId,
+        failedCount: failed.length,
+        attempt,
+        maxRetries: MAX_RETRIES,
+        delayMs,
+      });
 
       await prisma.invoice.update({
         where: { id: invoiceId },
@@ -227,7 +289,7 @@ async function processInvoice(invoiceId, retryCount = 0) {
 
       setTimeout(() => {
         processInvoice(invoiceId, attempt).catch((err) => {
-          console.error(`Invoice ${invoiceId}: Auto-retry ${attempt} failed:`, err.message);
+          logger.error('Auto-retry failed', { invoiceId, attempt, error: err.message });
         });
       }, delayMs);
     } else {
@@ -236,7 +298,15 @@ async function processInvoice(invoiceId, retryCount = 0) {
         data: { status: 'FAILED' },
       });
 
-      console.error(`Invoice ${invoiceId}: ${failed.length} loads failed after ${MAX_RETRIES} attempts`);
+      for (const job of pendingJobs) {
+        await emitEvent(job.id, 'INVOICE_FAILED', 'FAILED', { invoiceId, totalAttempts: MAX_RETRIES });
+      }
+
+      logger.error('Loads failed after max retries', {
+        invoiceId,
+        failedCount: failed.length,
+        maxRetries: MAX_RETRIES,
+      });
 
       try {
         await telegram.bot.sendMessage(
@@ -244,7 +314,7 @@ async function processInvoice(invoiceId, retryCount = 0) {
           `🚨 LOAD FAILED (${MAX_RETRIES} attempts) 🚨\n\nInvoice #${invoiceId}\nVendor: ${invoice.vendor.name}\n\nUse the admin dashboard to retry manually.`
         );
       } catch (err) {
-        console.error('Telegram failure alert failed:', err.message);
+        logger.error('Telegram failure alert failed', { error: err.message });
       }
     }
   }
@@ -280,7 +350,7 @@ async function executeLoad(job, platform, account, credits, parentVendor, transa
 
   try {
     if (DRY_RUN) {
-      console.log(`[DRY RUN] Would load ${platform}: ${credits} credits to ${account.username}`);
+      logger.info('[DRY RUN] Would load credits', { platform, account: account.username, credits });
       result = { success: true, platform, account: account.username, credits, dryRun: true };
     } else if (platform === 'PLAY777') {
       result = await play777.loadCredits(
@@ -308,6 +378,13 @@ async function executeLoad(job, platform, account, credits, parentVendor, transa
       errorMessage: result.success ? null : (result.error || 'Unknown error'),
       completedAt: result.success ? new Date() : null,
     },
+  });
+
+  await emitEvent(job.id, result.success ? 'LOAD_OK' : 'LOAD_FAILED', result.success ? 'SUCCESS' : 'FAILED', {
+    platform,
+    account: account.username,
+    credits,
+    error: result.error || null,
   });
 
   // Reset to PENDING if failed (so retry picks it up)
