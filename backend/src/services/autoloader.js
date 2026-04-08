@@ -397,6 +397,16 @@ async function executeLoad(job, platform, account, credits, parentVendor, transa
     error: result.error || null,
   });
 
+  // Log verification result if available
+  if (result.success && result.verified !== undefined) {
+    await emitEvent(job.id, result.verified ? 'VERIFIED' : 'UNVERIFIED', result.verified ? 'SUCCESS' : 'INFO', {
+      platform,
+      account: account.username,
+      transactionId: result.transactionId || null,
+      verified: result.verified,
+    });
+  }
+
   // Reset to PENDING if failed (so retry picks it up)
   if (!result.success) {
     await prisma.loadJob.update({

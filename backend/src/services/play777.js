@@ -7,6 +7,7 @@ const { logger } = require('./logger');
 
 const DASHBOARD_URL = 'https://pna.play777games.com/dashboard';
 const VENDORS_URL = 'https://pna.play777games.com/vendors-overview';
+const MY_BALANCE_URL = 'https://pna.play777games.com/history/my-balance';
 const USERNAME = process.env.PLAY777_USERNAME;
 const PASSWORD = process.env.PLAY777_PASSWORD;
 
@@ -269,6 +270,69 @@ async function loadOperator(page, vendor, operator, credits, transactionType = '
   logger.info('Play777: Successfully loaded credits to operator', { credits, username: operator.username });
 }
 
+// Verify a transaction by checking My Balance page
+async function verifyTransaction(page, expectedAccount, expectedType, expectedCredits, jobId = 0) {
+  try {
+    await page.goto(MY_BALANCE_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await humanDelay(5000, 8000);
+
+    // Wait for the table to load
+    try {
+      await page.locator('table tbody tr').first().waitFor({ state: 'attached', timeout: 30000 });
+    } catch {
+      logger.warn('My Balance table did not load — skipping verification', { jobId });
+      return { verified: false, reason: 'Table did not load' };
+    }
+    await humanDelay(1000, 2000);
+
+    // Check the most recent transactions (top 5 rows) for a match
+    const match = await page.evaluate(({ account, type, credits }) => {
+      const rows = document.querySelectorAll('table tbody tr');
+      for (let i = 0; i < Math.min(rows.length, 5); i++) {
+        const cells = rows[i].querySelectorAll('td');
+        if (cells.length < 6) continue;
+
+        const transactionId = cells[0]?.innerText?.trim();
+        const date = cells[1]?.innerText?.trim();
+        const to = cells[3]?.innerText?.trim();
+        const txType = cells[4]?.innerText?.trim();
+        const amount = cells[5]?.innerText?.trim();
+        const balance = cells[6]?.innerText?.trim();
+
+        // Match by account name and transaction type
+        const accountMatch = to && to.includes(account);
+        const typeMatch = txType && txType.toLowerCase() === type.toLowerCase();
+
+        if (accountMatch && typeMatch) {
+          return { found: true, transactionId, date, to, type: txType, amount, balance, rowIndex: i };
+        }
+      }
+      return { found: false };
+    }, { account: expectedAccount, type: expectedType, credits: expectedCredits });
+
+    if (match.found) {
+      logger.info('Transaction verified in My Balance', {
+        transactionId: match.transactionId,
+        account: expectedAccount,
+        type: expectedType,
+        amount: match.amount,
+        balance: match.balance,
+      });
+      return { verified: true, ...match };
+    }
+
+    logger.warn('Transaction not found in My Balance — may need more time to appear', {
+      account: expectedAccount,
+      type: expectedType,
+      jobId,
+    });
+    return { verified: false, reason: 'Transaction not found in recent rows' };
+  } catch (err) {
+    logger.error('Verification failed', { error: err, jobId });
+    return { verified: false, reason: err.message };
+  }
+}
+
 async function loadCredits(account, credits, parentVendor, transactionType = 'deposit', jobId = 0) {
   let session;
 
@@ -292,9 +356,20 @@ async function loadCredits(account, credits, parentVendor, transactionType = 'de
       await loadVendor(page, account, credits, transactionType, jobId);
     }
 
+    // Verify the transaction in My Balance
+    const txType = transactionType === 'correction' ? 'Correction' : 'Deposit';
+    const verification = await verifyTransaction(page, account.username, txType, credits, jobId);
+
     await saveSession(context, 'play777');
 
-    return { success: true, platform: 'PLAY777', account: account.username, credits };
+    return {
+      success: true,
+      platform: 'PLAY777',
+      account: account.username,
+      credits,
+      verified: verification.verified,
+      transactionId: verification.transactionId || null,
+    };
   };
 
   try {
@@ -315,4 +390,4 @@ async function loadCredits(account, credits, parentVendor, transactionType = 'de
   }
 }
 
-module.exports = { loadCredits, ensureLoggedIn };
+module.exports = { loadCredits, ensureLoggedIn, verifyTransaction };
