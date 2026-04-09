@@ -7,6 +7,7 @@ const prisma = require('./db/client');
 const formRoutes = require('./routes/forms');
 const webhookRoutes = require('./routes/webhooks');
 const adminRoutes = require('./routes/admin');
+const creditLineRoutes = require('./routes/creditLine');
 const { startWebhookProcessor } = require('./services/webhookProcessor');
 const { startHealthChecks } = require('./services/healthDigest');
 const { logger } = require('./services/logger');
@@ -119,6 +120,7 @@ app.get('/api/qb-callback', async (req, res) => {
 });
 
 app.use('/api', formRoutes);
+app.use('/api', creditLineRoutes);
 app.use('/api', webhookRoutes);
 app.use('/api/admin', adminRoutes);
 
