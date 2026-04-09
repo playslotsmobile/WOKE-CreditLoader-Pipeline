@@ -116,22 +116,37 @@ ${targets}`;
     return;
   }
 
-  const mainMsg = `✅ LOADED ✅
+  // Check if this invoice has a credit line repayment allocation
+  const creditLineRepayment = allocations.find((a) => a.isCreditLineRepayment);
+  const loadAllocations = allocations.filter((a) => !a.isCreditLineRepayment);
+
+  let mainMsg = `✅ LOADED ✅
 
 ${vendor.name}
 
 Invoice ID: ${invoice.qbInvoiceId || invoice.id}
 
-${allocationBlocks(allocations)}`;
+${allocationBlocks(loadAllocations)}`;
+
+  if (creditLineRepayment) {
+    mainMsg += `\n\n💳 Credit Line Repayment — ${fmt(creditLineRepayment.dollarAmount)}`;
+    if (creditLineRepayment.creditLineBalance) {
+      mainMsg += `\n  Balance: ${fmt(creditLineRepayment.creditLineBalance.usedAmount)} / ${fmt(creditLineRepayment.creditLineBalance.capAmount)} used`;
+    }
+  }
 
   await bot.sendMessage(ADMIN_CHAT_ID, mainMsg);
 
   if (vendor.telegramChatId) {
-    const vendorMsg = `✅ LOADED ✅
+    let vendorMsg = `✅ LOADED ✅
 
 Credits have been loaded.
 
-${allocationBlocksCreditsOnly(allocations)}`;
+${allocationBlocksCreditsOnly(loadAllocations)}`;
+
+    if (creditLineRepayment) {
+      vendorMsg += `\n\n💳 Credit Line Repayment — ${fmt(creditLineRepayment.dollarAmount)}`;
+    }
 
     await bot.sendMessage(vendor.telegramChatId, vendorMsg);
   }
@@ -161,6 +176,53 @@ async function sendVendorFailed(vendor, invoice) {
   }
 }
 
+// ── Credit Line Draw ──
+
+async function sendCreditLineDraw(vendor, invoice, allocations, creditLineBalance) {
+  const allocLines = allocations
+    .filter((a) => a.dollarAmount > 0)
+    .map((a) => {
+      const p = a.platform === 'PLAY777' ? '777' : 'IConnect';
+      return `${a.username} (${p}) — ${a.credits.toLocaleString()} credits (${fmt(a.dollarAmount)})`;
+    })
+    .join('\n');
+
+  const mainMsg = `💳 Credit Line Request
+
+${vendor.name}
+
+Amount: ${fmt(invoice.baseAmount)}
+
+${allocLines}
+
+Balance: ${fmt(creditLineBalance.usedAmount)} / ${fmt(creditLineBalance.capAmount)} used`;
+
+  await bot.sendMessage(ADMIN_CHAT_ID, mainMsg);
+
+  if (vendor.telegramChatId) {
+    const vendorMsg = `💳 Credit Line Request Received
+
+Your credit line request for ${fmt(invoice.baseAmount)} has been submitted. Credits will be loaded shortly.
+
+${allocLines}`;
+
+    await bot.sendMessage(vendor.telegramChatId, vendorMsg);
+  }
+}
+
+// ── Credit Line Repayment ──
+
+async function sendCreditLineRepayment(vendor, repaymentAmount, creditLineBalance) {
+  const mainMsg = `💳 Credit Line Repayment
+
+${vendor.name}
+
+Repaid: ${fmt(repaymentAmount)}
+Balance: ${fmt(creditLineBalance.usedAmount)} / ${fmt(creditLineBalance.capAmount)} used`;
+
+  await bot.sendMessage(ADMIN_CHAT_ID, mainMsg);
+}
+
 module.exports = {
   bot,
   sendWireSubmitted,
@@ -168,4 +230,6 @@ module.exports = {
   sendLoaded,
   sendVendorPaid,
   sendVendorFailed,
+  sendCreditLineDraw,
+  sendCreditLineRepayment,
 };
