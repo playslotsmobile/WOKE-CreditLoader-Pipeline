@@ -80,8 +80,9 @@ export default function VendorForm() {
   const allAccounts = vendor?.accounts || [];
 
   // Split accounts into invoice vs correction
+  // Hide chain-source accounts (they have chainToAccId) — show the final destination instead
   const invoiceAccounts = allAccounts.filter(
-    (a) => a.loadType !== 'correction' && a.loadType !== 'operator'
+    (a) => a.loadType !== 'correction' && !a.chainToAccId
   );
   const correctionAccounts = allAccounts.filter(
     (a) => a.loadType === 'correction'

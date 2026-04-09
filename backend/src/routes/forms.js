@@ -70,10 +70,19 @@ router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) =>
     const enrichedAllocations = [];
     for (const a of allocations) {
       if (a.dollarAmount <= 0) continue;
+
+      // If this is an operator account with a parent vendor, swap to the parent
+      // so the chain load works (parent → operator)
+      let targetAccountId = a.accountId;
+      const targetAccount = await prisma.vendorAccount.findUnique({ where: { id: a.accountId } });
+      if (targetAccount && targetAccount.parentVendorAccId) {
+        targetAccountId = targetAccount.parentVendorAccId;
+      }
+
       const alloc = await prisma.invoiceAllocation.create({
         data: {
           invoiceId: invoice.id,
-          vendorAccountId: a.accountId,
+          vendorAccountId: targetAccountId,
           dollarAmount: a.dollarAmount,
           credits: a.credits,
         },
