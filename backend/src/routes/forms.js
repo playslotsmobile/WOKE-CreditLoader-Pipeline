@@ -33,7 +33,7 @@ router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) =>
       body = JSON.parse(body.data);
     }
     const { vendorSlug, method, baseAmount, feeAmount, totalAmount, allocations } = body;
-    const creditLineRepaymentAmount = body.creditLineRepayment ? Number(body.creditLineRepayment) : 0;
+    const clRepayment = body.creditLineRepayment ? Number(body.creditLineRepayment) : 0;
 
     const vendor = await prisma.vendor.findUnique({
       where: { slug: vendorSlug },
@@ -51,14 +51,14 @@ router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) =>
       feeAmount: Number(feeAmount),
       totalAmount: Number(totalAmount),
       allocations: allocations.map((a) => ({ accountId: a.accountId, dollarAmount: Number(a.dollarAmount), credits: a.credits })),
-      creditLineRepayment: creditLineRepaymentAmount,
+      creditLineRepayment: clRepayment,
     });
     if (!validation.valid) {
       return res.status(400).json({ error: validation.error });
     }
 
     // Validate credit line repayment before creating invoice
-    if (creditLineRepaymentAmount > 0) {
+    if (clRepayment > 0) {
       const cl = await creditLineService.getCreditLine(vendor.id);
       if (!cl) {
         return res.status(400).json({ error: 'Vendor does not have a credit line' });
@@ -111,11 +111,11 @@ router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) =>
     }
 
     // Store credit line repayment intent if present
-    if (creditLineRepaymentAmount > 0) {
+    if (clRepayment > 0) {
       await prisma.setting.upsert({
         where: { key: `credit_line_repayment_${invoice.id}` },
-        update: { value: String(creditLineRepaymentAmount) },
-        create: { key: `credit_line_repayment_${invoice.id}`, value: String(creditLineRepaymentAmount) },
+        update: { value: String(clRepayment) },
+        create: { key: `credit_line_repayment_${invoice.id}`, value: String(clRepayment) },
       });
     }
 
