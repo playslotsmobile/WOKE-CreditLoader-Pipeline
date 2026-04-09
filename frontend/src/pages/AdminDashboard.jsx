@@ -18,6 +18,9 @@ export default function AdminDashboard() {
   const [vendorStats, setVendorStats] = useState([]);
   const [corrections, setCorrections] = useState([]);
   const [selectedInvoiceEvents, setSelectedInvoiceEvents] = useState(null);
+  const [creditLines, setCreditLines] = useState([]);
+  const [clTransactions, setClTransactions] = useState([]);
+  const [clVendorFilter, setClVendorFilter] = useState('');
   const navigate = useNavigate();
 
   function handleAuthError(err) {
@@ -58,6 +61,25 @@ export default function AdminDashboard() {
     }
   }, []);
 
+  const fetchCreditLines = useCallback(async () => {
+    try {
+      const res = await axios.get('/api/admin/credit-lines', { headers: getAuthHeaders() });
+      setCreditLines(res.data);
+    } catch (err) {
+      handleAuthError(err);
+    }
+  }, []);
+
+  const fetchClTransactions = useCallback(async () => {
+    try {
+      const params = clVendorFilter ? `?vendorSlug=${clVendorFilter}` : '';
+      const res = await axios.get(`/api/admin/credit-line-transactions${params}`, { headers: getAuthHeaders() });
+      setClTransactions(res.data);
+    } catch (err) {
+      handleAuthError(err);
+    }
+  }, [clVendorFilter]);
+
   useEffect(() => {
     if (!localStorage.getItem('admin_token')) {
       navigate('/admin/login');
@@ -66,9 +88,15 @@ export default function AdminDashboard() {
     fetchInvoices();
     fetchVendorStats();
     fetchCorrections();
+    fetchCreditLines();
+    fetchClTransactions();
     const interval = setInterval(fetchInvoices, 5000);
     return () => clearInterval(interval);
-  }, [fetchInvoices, fetchVendorStats, fetchCorrections]);
+  }, [fetchInvoices, fetchVendorStats, fetchCorrections, fetchCreditLines, fetchClTransactions]);
+
+  useEffect(() => {
+    fetchClTransactions();
+  }, [clVendorFilter, fetchClTransactions]);
 
   async function handleConfirmWire(invoiceId) {
     try {
@@ -183,6 +211,12 @@ export default function AdminDashboard() {
               >
                 Corrections
               </button>
+              <button
+                onClick={() => setView('creditLines')}
+                className={`px-3 py-1 text-xs rounded-md transition ${view === 'creditLines' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-300'}`}
+              >
+                Credit Lines
+              </button>
             </div>
           </div>
         </div>
@@ -197,6 +231,13 @@ export default function AdminDashboard() {
             onTriggerLoad={handleTriggerLoad}
             onResendEmail={handleResendEmail}
             onShowEvents={(id) => setSelectedInvoiceEvents(id)}
+          />
+        ) : view === 'creditLines' ? (
+          <CreditLinesView
+            creditLines={creditLines}
+            transactions={clTransactions}
+            vendorFilter={clVendorFilter}
+            onVendorFilter={(slug) => setClVendorFilter(slug)}
           />
         ) : view === 'corrections' ? (
           <CorrectionLog corrections={corrections} />
@@ -462,6 +503,116 @@ function CorrectionLog({ corrections }) {
           })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function CreditLinesView({ creditLines, transactions, vendorFilter, onVendorFilter }) {
+  function fmtUsd(n) {
+    return '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  return (
+    <div>
+      {/* Summary Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-6">
+        {creditLines.map((cl) => {
+          const pct = cl.capAmount > 0 ? (cl.usedAmount / cl.capAmount) * 100 : 0;
+          const color = pct > 80 ? 'text-red-400' : pct > 50 ? 'text-yellow-400' : 'text-green-400';
+          return (
+            <div
+              key={cl.id}
+              onClick={() => onVendorFilter(vendorFilter === cl.vendorSlug ? '' : cl.vendorSlug)}
+              className={`bg-[#161922] rounded-xl border cursor-pointer transition ${
+                vendorFilter === cl.vendorSlug ? 'border-blue-500' : 'border-gray-800 hover:border-gray-600'
+              } p-4`}
+            >
+              <p className="text-xs text-gray-500 mb-1">{cl.vendorName}</p>
+              <p className={`text-xl font-bold ${color}`}>{fmtUsd(cl.availableAmount)}</p>
+              <div className="w-full bg-gray-800 rounded-full h-1.5 mt-2">
+                <div
+                  className={`h-1.5 rounded-full ${
+                    pct > 80 ? 'bg-red-500' : pct > 50 ? 'bg-yellow-500' : 'bg-green-500'
+                  }`}
+                  style={{ width: `${pct}%` }}
+                ></div>
+              </div>
+              <p className="text-[10px] text-gray-600 mt-1">
+                {fmtUsd(cl.usedAmount)} / {fmtUsd(cl.capAmount)} used
+              </p>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Transaction History */}
+      <div className="bg-[#161922] rounded-xl border border-gray-800 overflow-x-auto">
+        <div className="flex justify-between items-center px-4 py-3 border-b border-gray-800">
+          <h3 className="text-sm font-semibold text-gray-300">
+            Transaction History
+            {vendorFilter && <span className="text-blue-400 ml-2">({vendorFilter})</span>}
+          </h3>
+          {vendorFilter && (
+            <button
+              onClick={() => onVendorFilter('')}
+              className="text-xs text-gray-500 hover:text-gray-300"
+            >
+              Clear filter
+            </button>
+          )}
+        </div>
+        <table className="w-full text-sm min-w-[640px]">
+          <thead>
+            <tr className="border-b border-gray-800 text-left text-xs text-gray-500 uppercase tracking-wider">
+              <th className="px-4 py-3">Date</th>
+              <th className="px-4 py-3">Vendor</th>
+              <th className="px-4 py-3">Type</th>
+              <th className="px-4 py-3 text-right">Amount</th>
+              <th className="px-4 py-3 text-right">Balance After</th>
+              <th className="px-4 py-3">Invoice</th>
+            </tr>
+          </thead>
+          <tbody>
+            {transactions.length === 0 ? (
+              <tr>
+                <td colSpan="6" className="px-4 py-8 text-center text-gray-500">
+                  No transactions yet.
+                </td>
+              </tr>
+            ) : (
+              transactions.map((t) => (
+                <tr key={t.id} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition">
+                  <td className="px-4 py-3 text-xs text-gray-500">
+                    {new Date(t.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}{' '}
+                    {new Date(t.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </td>
+                  <td className="px-4 py-3 font-medium text-gray-200 capitalize">{t.vendorName}</td>
+                  <td className="px-4 py-3">
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${
+                      t.type === 'DRAW'
+                        ? 'bg-orange-500/15 text-orange-400 border-orange-500/30'
+                        : 'bg-green-500/15 text-green-400 border-green-500/30'
+                    }`}>
+                      {t.type}
+                    </span>
+                  </td>
+                  <td className={`px-4 py-3 text-right font-mono ${
+                    t.type === 'DRAW' ? 'text-orange-400' : 'text-green-400'
+                  }`}>
+                    {t.type === 'DRAW' ? '-' : '+'}{fmtUsd(t.amount)}
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono text-gray-300">
+                    {fmtUsd(t.balanceAfter)}
+                  </td>
+                  <td className="px-4 py-3 text-gray-500 font-mono text-xs">
+                    #{t.invoiceId}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

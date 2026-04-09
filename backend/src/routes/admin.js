@@ -339,4 +339,77 @@ router.post('/accounts/:id/rate', async (req, res) => {
   }
 });
 
+// Credit Line overview (all vendors)
+router.get('/credit-lines', async (req, res) => {
+  try {
+    const creditLines = await prisma.creditLine.findMany({
+      include: {
+        vendor: { select: { slug: true, name: true, businessName: true } },
+      },
+    });
+
+    const formatted = creditLines.map((cl) => ({
+      id: cl.id,
+      vendorSlug: cl.vendor.slug,
+      vendorName: cl.vendor.name,
+      businessName: cl.vendor.businessName,
+      capAmount: Number(cl.capAmount),
+      usedAmount: Number(cl.usedAmount),
+      availableAmount: Number(cl.capAmount) - Number(cl.usedAmount),
+      updatedAt: cl.updatedAt,
+    }));
+
+    res.json(formatted);
+  } catch (err) {
+    logger.error('Credit lines overview error', { error: err });
+    res.status(500).json({ error: 'Failed to fetch credit lines' });
+  }
+});
+
+// Credit Line transactions (all or filtered by vendor)
+router.get('/credit-line-transactions', async (req, res) => {
+  try {
+    const { vendorSlug, type } = req.query;
+
+    const where = {};
+    if (vendorSlug) {
+      const vendor = await prisma.vendor.findUnique({ where: { slug: vendorSlug } });
+      if (vendor) {
+        const cl = await prisma.creditLine.findUnique({ where: { vendorId: vendor.id } });
+        if (cl) where.creditLineId = cl.id;
+      }
+    }
+    if (type) where.type = type;
+
+    const transactions = await prisma.creditLineTransaction.findMany({
+      where,
+      include: {
+        creditLine: {
+          include: { vendor: { select: { slug: true, name: true } } },
+        },
+        invoice: { select: { id: true, method: true, baseAmount: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+
+    const formatted = transactions.map((t) => ({
+      id: t.id,
+      vendorSlug: t.creditLine.vendor.slug,
+      vendorName: t.creditLine.vendor.name,
+      type: t.type,
+      amount: Number(t.amount),
+      balanceBefore: Number(t.balanceBefore),
+      balanceAfter: Number(t.balanceAfter),
+      invoiceId: t.invoiceId,
+      createdAt: t.createdAt,
+    }));
+
+    res.json(formatted);
+  } catch (err) {
+    logger.error('Credit line transactions error', { error: err });
+    res.status(500).json({ error: 'Failed to fetch credit line transactions' });
+  }
+});
+
 module.exports = router;
