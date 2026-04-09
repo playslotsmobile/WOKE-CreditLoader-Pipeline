@@ -14,9 +14,8 @@ function getAuthHeaders() {
 export default function AdminDashboard() {
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState('pipeline');
+  const [view, setView] = useState('dashboard');
   const [vendorStats, setVendorStats] = useState([]);
-  const [corrections, setCorrections] = useState([]);
   const [selectedInvoiceEvents, setSelectedInvoiceEvents] = useState(null);
   const [creditLines, setCreditLines] = useState([]);
   const [clTransactions, setClTransactions] = useState([]);
@@ -52,15 +51,6 @@ export default function AdminDashboard() {
     }
   }, []);
 
-  const fetchCorrections = useCallback(async () => {
-    try {
-      const res = await axios.get('/api/admin/corrections', { headers: getAuthHeaders() });
-      setCorrections(res.data);
-    } catch (err) {
-      handleAuthError(err);
-    }
-  }, []);
-
   const fetchCreditLines = useCallback(async () => {
     try {
       const res = await axios.get('/api/admin/credit-lines', { headers: getAuthHeaders() });
@@ -87,12 +77,11 @@ export default function AdminDashboard() {
     }
     fetchInvoices();
     fetchVendorStats();
-    fetchCorrections();
     fetchCreditLines();
     fetchClTransactions();
     const interval = setInterval(fetchInvoices, 5000);
     return () => clearInterval(interval);
-  }, [fetchInvoices, fetchVendorStats, fetchCorrections, fetchCreditLines, fetchClTransactions]);
+  }, [fetchInvoices, fetchVendorStats, fetchCreditLines, fetchClTransactions]);
 
   useEffect(() => {
     fetchClTransactions();
@@ -154,7 +143,7 @@ export default function AdminDashboard() {
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-4">
               <h1
-                onClick={() => { setView('pipeline'); fetchInvoices(); fetchVendorStats(); fetchCorrections(); fetchCreditLines(); fetchClTransactions(); }}
+                onClick={() => { setView('dashboard'); fetchInvoices(); fetchVendorStats(); fetchCreditLines(); fetchClTransactions(); }}
                 className="text-lg font-bold tracking-tight cursor-pointer hover:opacity-80 transition"
               >
                 <span className="text-blue-400">WOKE</span>
@@ -191,28 +180,16 @@ export default function AdminDashboard() {
           <div className="flex mt-3 sm:mt-2">
             <div className="flex bg-gray-800 rounded-lg p-0.5">
               <button
+                onClick={() => setView('dashboard')}
+                className={`px-3 py-1 text-xs rounded-md transition ${view === 'dashboard' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-300'}`}
+              >
+                Dashboard
+              </button>
+              <button
                 onClick={() => setView('pipeline')}
                 className={`px-3 py-1 text-xs rounded-md transition ${view === 'pipeline' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-300'}`}
               >
                 Pipeline
-              </button>
-              <button
-                onClick={() => setView('list')}
-                className={`px-3 py-1 text-xs rounded-md transition ${view === 'list' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-300'}`}
-              >
-                List
-              </button>
-              <button
-                onClick={() => setView('vendors')}
-                className={`px-3 py-1 text-xs rounded-md transition ${view === 'vendors' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-300'}`}
-              >
-                Vendors
-              </button>
-              <button
-                onClick={() => setView('corrections')}
-                className={`px-3 py-1 text-xs rounded-md transition ${view === 'corrections' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-300'}`}
-              >
-                Corrections
               </button>
               <button
                 onClick={() => setView('creditLines')}
@@ -226,7 +203,9 @@ export default function AdminDashboard() {
       </header>
 
       <main className="p-3 sm:p-6">
-        {view === 'pipeline' ? (
+        {view === 'dashboard' ? (
+          <VendorLeaderboard vendors={vendorStats} />
+        ) : view === 'pipeline' ? (
           <InvoicePipeline
             invoices={invoices}
             statuses={STATUSES}
@@ -242,19 +221,7 @@ export default function AdminDashboard() {
             vendorFilter={clVendorFilter}
             onVendorFilter={(slug) => setClVendorFilter(slug)}
           />
-        ) : view === 'corrections' ? (
-          <CorrectionLog corrections={corrections} />
-        ) : view === 'vendors' ? (
-          <VendorLeaderboard vendors={vendorStats} />
-        ) : (
-          <ListView
-            invoices={invoices}
-            onConfirmWire={handleConfirmWire}
-            onTriggerLoad={handleTriggerLoad}
-            onResendEmail={handleResendEmail}
-            onShowEvents={(id) => setSelectedInvoiceEvents(id)}
-          />
-        )}
+        ) : null}
       </main>
 
       {selectedInvoiceEvents && (
@@ -273,131 +240,6 @@ function Stat({ label, value, color }) {
     <div className="flex items-center gap-1.5">
       <span className={`font-bold text-base ${color}`}>{value}</span>
       <span className="text-gray-600">{label}</span>
-    </div>
-  );
-}
-
-function ListView({ invoices, onConfirmWire, onTriggerLoad, onResendEmail, onShowEvents }) {
-  if (invoices.length === 0) {
-    return <p className="text-gray-500 text-center py-12">No invoices yet.</p>;
-  }
-
-  function ActionButtons({ invoice }) {
-    return (
-      <div className="flex gap-1.5 flex-wrap">
-        {invoice.status === 'PENDING' && (
-          <button onClick={() => onConfirmWire(invoice.id)} className="text-xs px-2 py-1 bg-amber-600/20 text-amber-400 hover:bg-amber-600/30 rounded transition">
-            Confirm Wire
-          </button>
-        )}
-        {invoice.status === 'PAID' && (
-          <button onClick={() => onTriggerLoad(invoice.id)} className="text-xs px-2 py-1 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 rounded transition">
-            Load
-          </button>
-        )}
-        {invoice.status === 'FAILED' && (
-          <button onClick={() => onTriggerLoad(invoice.id)} className="text-xs px-2 py-1 bg-red-600/20 text-red-400 hover:bg-red-600/30 rounded transition">
-            Retry
-          </button>
-        )}
-        {(invoice.status === 'REQUESTED' || invoice.status === 'PENDING') && invoice.qbInvoiceId && (
-          <button onClick={() => onResendEmail(invoice.id)} className="text-xs px-2 py-1 bg-gray-600/20 text-gray-400 hover:bg-gray-600/30 rounded transition">
-            Resend
-          </button>
-        )}
-        <button onClick={() => onShowEvents(invoice.id)} className="text-xs px-2 py-1 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 rounded transition">
-          Events
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="bg-[#161922] rounded-xl border border-gray-800">
-      {/* Mobile: card layout */}
-      <div className="sm:hidden divide-y divide-gray-800/50">
-        {invoices.map(({ invoice, allocations }) => (
-          <div key={invoice.id} className="px-4 py-3 space-y-2">
-            <div className="flex justify-between items-center">
-              <span className="font-medium text-gray-200 capitalize">{invoice.vendorSlug}</span>
-              <StatusBadge status={invoice.status} />
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="font-mono text-lg font-bold text-gray-200">
-                ${Number(invoice.baseAmount).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-              </span>
-              <span className="text-xs text-gray-500">{invoice.method}</span>
-            </div>
-            <div className="flex flex-wrap gap-1">
-              {allocations.filter((a) => a.dollarAmount > 0).map((a, i) => {
-                const p = a.platform === 'PLAY777' ? '7' : 'IC';
-                return (
-                  <span key={i} className="text-xs bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded">
-                    {p}:{a.credits.toLocaleString()}
-                  </span>
-                );
-              })}
-            </div>
-            <div className="flex justify-between items-center">
-              <ActionButtons invoice={invoice} />
-              <span className="text-xs text-gray-500">
-                {new Date(invoice.submittedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </span>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Desktop: table layout */}
-      <div className="hidden sm:block overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-gray-800 text-left text-xs text-gray-500 uppercase tracking-wider">
-              <th className="px-4 py-3">Vendor</th>
-              <th className="px-4 py-3">Invoice</th>
-              <th className="px-4 py-3">Method</th>
-              <th className="px-4 py-3">Amount</th>
-              <th className="px-4 py-3">Accounts</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Time</th>
-              <th className="px-4 py-3">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {invoices.map(({ invoice, allocations }) => (
-              <tr key={invoice.id} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition">
-                <td className="px-4 py-3 font-medium text-gray-200">{invoice.vendorSlug}</td>
-                <td className="px-4 py-3 text-gray-400">#{invoice.qbInvoiceId || invoice.id}</td>
-                <td className="px-4 py-3 text-gray-400">{invoice.method}</td>
-                <td className="px-4 py-3 text-gray-200">
-                  ${Number(invoice.baseAmount).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex flex-wrap gap-1">
-                    {allocations.filter((a) => a.dollarAmount > 0).map((a, i) => {
-                      const p = a.platform === 'PLAY777' ? '7' : 'IC';
-                      return (
-                        <span key={i} className="text-xs bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded">
-                          {p}:{a.credits.toLocaleString()}
-                        </span>
-                      );
-                    })}
-                  </div>
-                </td>
-                <td className="px-4 py-3">
-                  <StatusBadge status={invoice.status} />
-                </td>
-                <td className="px-4 py-3 text-xs text-gray-500">
-                  {new Date(invoice.submittedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </td>
-                <td className="px-4 py-3">
-                  <ActionButtons invoice={invoice} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
     </div>
   );
 }
@@ -553,92 +395,6 @@ function SummaryCard({ label, value, sub, color }) {
       <p className="text-xs text-gray-500 mb-1">{label}</p>
       <p className={`text-2xl font-bold ${color}`}>{value}</p>
       <p className="text-[10px] text-gray-600 mt-1">{sub}</p>
-    </div>
-  );
-}
-
-function CorrectionLog({ corrections }) {
-  if (corrections.length === 0) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <p className="text-gray-500">No corrections yet.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="bg-[#161922] rounded-xl border border-gray-800">
-      {/* Mobile: card layout */}
-      <div className="sm:hidden divide-y divide-gray-800/50">
-        {corrections.map((c) => {
-          const totalCredits = c.allocations.reduce((s, a) => s + a.credits, 0);
-          return (
-            <div key={c.id} className="px-4 py-3 space-y-2">
-              <div className="flex justify-between items-center">
-                <span className="font-medium text-gray-200 capitalize">{c.vendorSlug}</span>
-                <StatusBadge status={c.status} />
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="font-mono text-lg font-bold text-gray-200">{totalCredits.toLocaleString()} credits</span>
-                <span className="text-xs text-gray-500 font-mono">#{c.id}</span>
-              </div>
-              <div className="flex flex-wrap gap-1">
-                {c.allocations.map((a, i) => (
-                  <span key={i} className="text-xs bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded">
-                    {a.username}: {a.credits.toLocaleString()}
-                  </span>
-                ))}
-              </div>
-              <div className="text-xs text-gray-500">
-                {new Date(c.submittedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}{' '}
-                {new Date(c.submittedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Desktop: table layout */}
-      <div className="hidden sm:block overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-gray-800 text-left text-xs text-gray-500 uppercase tracking-wider">
-              <th className="px-4 py-3">#</th>
-              <th className="px-4 py-3">Vendor</th>
-              <th className="px-4 py-3">Accounts</th>
-              <th className="px-4 py-3 text-right">Total Credits</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Time</th>
-            </tr>
-          </thead>
-          <tbody>
-            {corrections.map((c) => {
-              const totalCredits = c.allocations.reduce((s, a) => s + a.credits, 0);
-              return (
-                <tr key={c.id} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition">
-                  <td className="px-4 py-3 text-gray-500 font-mono text-xs">#{c.id}</td>
-                  <td className="px-4 py-3 font-medium text-gray-200 capitalize">{c.vendorSlug}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-1">
-                      {c.allocations.map((a, i) => (
-                        <span key={i} className="text-xs bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded">
-                          {a.username}: {a.credits.toLocaleString()}
-                        </span>
-                      ))}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-right font-mono text-gray-200">{totalCredits.toLocaleString()}</td>
-                  <td className="px-4 py-3"><StatusBadge status={c.status} /></td>
-                  <td className="px-4 py-3 text-xs text-gray-500">
-                    {new Date(c.submittedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}{' '}
-                    {new Date(c.submittedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
     </div>
   );
 }
