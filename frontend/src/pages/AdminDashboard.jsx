@@ -153,7 +153,10 @@ export default function AdminDashboard() {
           {/* Top row: logo + refresh */}
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-4">
-              <h1 className="text-lg font-bold tracking-tight">
+              <h1
+                onClick={() => { setView('pipeline'); fetchInvoices(); fetchVendorStats(); fetchCorrections(); fetchCreditLines(); fetchClTransactions(); }}
+                className="text-lg font-bold tracking-tight cursor-pointer hover:opacity-80 transition"
+              >
                 <span className="text-blue-400">WOKE</span>
                 <span className="text-gray-400">AVR</span>
               </h1>
@@ -279,79 +282,122 @@ function ListView({ invoices, onConfirmWire, onTriggerLoad, onResendEmail, onSho
     return <p className="text-gray-500 text-center py-12">No invoices yet.</p>;
   }
 
+  function ActionButtons({ invoice }) {
+    return (
+      <div className="flex gap-1.5 flex-wrap">
+        {invoice.status === 'PENDING' && (
+          <button onClick={() => onConfirmWire(invoice.id)} className="text-xs px-2 py-1 bg-amber-600/20 text-amber-400 hover:bg-amber-600/30 rounded transition">
+            Confirm Wire
+          </button>
+        )}
+        {invoice.status === 'PAID' && (
+          <button onClick={() => onTriggerLoad(invoice.id)} className="text-xs px-2 py-1 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 rounded transition">
+            Load
+          </button>
+        )}
+        {invoice.status === 'FAILED' && (
+          <button onClick={() => onTriggerLoad(invoice.id)} className="text-xs px-2 py-1 bg-red-600/20 text-red-400 hover:bg-red-600/30 rounded transition">
+            Retry
+          </button>
+        )}
+        {(invoice.status === 'REQUESTED' || invoice.status === 'PENDING') && invoice.qbInvoiceId && (
+          <button onClick={() => onResendEmail(invoice.id)} className="text-xs px-2 py-1 bg-gray-600/20 text-gray-400 hover:bg-gray-600/30 rounded transition">
+            Resend
+          </button>
+        )}
+        <button onClick={() => onShowEvents(invoice.id)} className="text-xs px-2 py-1 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 rounded transition">
+          Events
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <div className="bg-[#161922] rounded-xl border border-gray-800 overflow-x-auto">
-      <table className="w-full text-sm min-w-[640px]">
-        <thead>
-          <tr className="border-b border-gray-800 text-left text-xs text-gray-500 uppercase tracking-wider">
-            <th className="px-4 py-3">Vendor</th>
-            <th className="px-4 py-3">Invoice</th>
-            <th className="px-4 py-3">Method</th>
-            <th className="px-4 py-3">Amount</th>
-            <th className="px-4 py-3">Accounts</th>
-            <th className="px-4 py-3">Status</th>
-            <th className="px-4 py-3">Time</th>
-            <th className="px-4 py-3">Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          {invoices.map(({ invoice, allocations }) => (
-            <tr key={invoice.id} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition">
-              <td className="px-4 py-3 font-medium text-gray-200">{invoice.vendorSlug}</td>
-              <td className="px-4 py-3 text-gray-400">#{invoice.qbInvoiceId || invoice.id}</td>
-              <td className="px-4 py-3 text-gray-400">{invoice.method}</td>
-              <td className="px-4 py-3 text-gray-200">
+    <div className="bg-[#161922] rounded-xl border border-gray-800">
+      {/* Mobile: card layout */}
+      <div className="sm:hidden divide-y divide-gray-800/50">
+        {invoices.map(({ invoice, allocations }) => (
+          <div key={invoice.id} className="px-4 py-3 space-y-2">
+            <div className="flex justify-between items-center">
+              <span className="font-medium text-gray-200 capitalize">{invoice.vendorSlug}</span>
+              <StatusBadge status={invoice.status} />
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="font-mono text-lg font-bold text-gray-200">
                 ${Number(invoice.baseAmount).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-              </td>
-              <td className="px-4 py-3">
-                <div className="flex flex-wrap gap-1">
-                  {allocations.filter((a) => a.dollarAmount > 0).map((a, i) => {
-                    const p = a.platform === 'PLAY777' ? '7' : 'IC';
-                    return (
-                      <span key={i} className="text-xs bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded">
-                        {p}:{a.credits.toLocaleString()}
-                      </span>
-                    );
-                  })}
-                </div>
-              </td>
-              <td className="px-4 py-3">
-                <StatusBadge status={invoice.status} />
-              </td>
-              <td className="px-4 py-3 text-xs text-gray-500">
+              </span>
+              <span className="text-xs text-gray-500">{invoice.method}</span>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {allocations.filter((a) => a.dollarAmount > 0).map((a, i) => {
+                const p = a.platform === 'PLAY777' ? '7' : 'IC';
+                return (
+                  <span key={i} className="text-xs bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded">
+                    {p}:{a.credits.toLocaleString()}
+                  </span>
+                );
+              })}
+            </div>
+            <div className="flex justify-between items-center">
+              <ActionButtons invoice={invoice} />
+              <span className="text-xs text-gray-500">
                 {new Date(invoice.submittedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </td>
-              <td className="px-4 py-3">
-                <div className="flex gap-1.5">
-                  {invoice.status === 'PENDING' && (
-                    <button onClick={() => onConfirmWire(invoice.id)} className="text-xs px-2 py-1 bg-amber-600/20 text-amber-400 hover:bg-amber-600/30 rounded transition">
-                      Confirm Wire
-                    </button>
-                  )}
-                  {invoice.status === 'PAID' && (
-                    <button onClick={() => onTriggerLoad(invoice.id)} className="text-xs px-2 py-1 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 rounded transition">
-                      Load
-                    </button>
-                  )}
-                  {invoice.status === 'FAILED' && (
-                    <button onClick={() => onTriggerLoad(invoice.id)} className="text-xs px-2 py-1 bg-red-600/20 text-red-400 hover:bg-red-600/30 rounded transition">
-                      Retry
-                    </button>
-                  )}
-                  {(invoice.status === 'REQUESTED' || invoice.status === 'PENDING') && invoice.qbInvoiceId && (
-                    <button onClick={() => onResendEmail(invoice.id)} className="text-xs px-2 py-1 bg-gray-600/20 text-gray-400 hover:bg-gray-600/30 rounded transition">
-                      Resend
-                    </button>
-                  )}
-                  <button onClick={() => onShowEvents(invoice.id)} className="text-xs px-2 py-1 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 rounded transition">
-                    Events
-                  </button>
-                </div>
-              </td>
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop: table layout */}
+      <div className="hidden sm:block overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-800 text-left text-xs text-gray-500 uppercase tracking-wider">
+              <th className="px-4 py-3">Vendor</th>
+              <th className="px-4 py-3">Invoice</th>
+              <th className="px-4 py-3">Method</th>
+              <th className="px-4 py-3">Amount</th>
+              <th className="px-4 py-3">Accounts</th>
+              <th className="px-4 py-3">Status</th>
+              <th className="px-4 py-3">Time</th>
+              <th className="px-4 py-3">Action</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {invoices.map(({ invoice, allocations }) => (
+              <tr key={invoice.id} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition">
+                <td className="px-4 py-3 font-medium text-gray-200">{invoice.vendorSlug}</td>
+                <td className="px-4 py-3 text-gray-400">#{invoice.qbInvoiceId || invoice.id}</td>
+                <td className="px-4 py-3 text-gray-400">{invoice.method}</td>
+                <td className="px-4 py-3 text-gray-200">
+                  ${Number(invoice.baseAmount).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                </td>
+                <td className="px-4 py-3">
+                  <div className="flex flex-wrap gap-1">
+                    {allocations.filter((a) => a.dollarAmount > 0).map((a, i) => {
+                      const p = a.platform === 'PLAY777' ? '7' : 'IC';
+                      return (
+                        <span key={i} className="text-xs bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded">
+                          {p}:{a.credits.toLocaleString()}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </td>
+                <td className="px-4 py-3">
+                  <StatusBadge status={invoice.status} />
+                </td>
+                <td className="px-4 py-3 text-xs text-gray-500">
+                  {new Date(invoice.submittedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </td>
+                <td className="px-4 py-3">
+                  <ActionButtons invoice={invoice} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -380,65 +426,106 @@ function VendorLeaderboard({ vendors }) {
       </div>
 
       {/* Leaderboard */}
-      <div className="bg-[#161922] rounded-xl border border-gray-800 overflow-x-auto">
-        <table className="w-full text-sm min-w-[768px]">
-          <thead>
-            <tr className="border-b border-gray-800 text-left text-xs text-gray-500 uppercase tracking-wider">
-              <th className="px-4 py-3 w-12">#</th>
-              <th className="px-4 py-3">Vendor</th>
-              <th className="px-4 py-3">Business</th>
-              <th className="px-4 py-3 text-right">Total Spent</th>
-              <th className="px-4 py-3 text-right">Credits Loaded</th>
-              <th className="px-4 py-3 text-right">Invoices</th>
-              <th className="px-4 py-3 text-right">Avg / Invoice</th>
-              <th className="px-4 py-3">Last Active</th>
-              <th className="px-4 py-3 w-32">Volume</th>
-            </tr>
-          </thead>
-          <tbody>
-            {vendors.map((v, i) => {
-              const pct = vendors[0].totalSpent > 0 ? (v.totalSpent / vendors[0].totalSpent) * 100 : 0;
-              const avg = v.invoiceCount > 0 ? v.totalSpent / v.invoiceCount : 0;
-              const isTop3 = i < 3;
-              return (
-                <tr key={v.slug} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition">
-                  <td className="px-4 py-3">
+      <div className="bg-[#161922] rounded-xl border border-gray-800">
+        {/* Mobile: card layout */}
+        <div className="sm:hidden divide-y divide-gray-800/50">
+          {vendors.map((v, i) => {
+            const pct = vendors[0].totalSpent > 0 ? (v.totalSpent / vendors[0].totalSpent) * 100 : 0;
+            const avg = v.invoiceCount > 0 ? v.totalSpent / v.invoiceCount : 0;
+            const isTop3 = i < 3;
+            return (
+              <div key={v.slug} className="px-4 py-3 space-y-2">
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-2">
                     {isTop3 ? (
-                      <span className={`text-xs font-bold ${i === 0 ? 'text-yellow-400' : i === 1 ? 'text-gray-300' : 'text-amber-600'}`}>
-                        {i === 0 ? '\u{1F947}' : i === 1 ? '\u{1F948}' : '\u{1F949}'}
-                      </span>
+                      <span className="text-sm">{i === 0 ? '\u{1F947}' : i === 1 ? '\u{1F948}' : '\u{1F949}'}</span>
                     ) : (
                       <span className="text-xs text-gray-600">{i + 1}</span>
                     )}
-                  </td>
-                  <td className="px-4 py-3 font-medium text-gray-200">{v.name}</td>
-                  <td className="px-4 py-3 text-xs text-gray-500">{v.business}</td>
-                  <td className="px-4 py-3 text-right font-mono text-gray-200">
-                    ${v.totalSpent.toLocaleString()}
-                  </td>
-                  <td className="px-4 py-3 text-right font-mono text-blue-400">
-                    {v.totalCredits.toLocaleString()}
-                  </td>
-                  <td className="px-4 py-3 text-right text-gray-400">{v.invoiceCount}</td>
-                  <td className="px-4 py-3 text-right text-xs text-gray-500">
-                    ${Math.round(avg).toLocaleString()}
-                  </td>
-                  <td className="px-4 py-3 text-xs text-gray-500">
-                    {v.lastActive ? new Date(v.lastActive).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '-'}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="w-full bg-gray-800 rounded-full h-1.5">
-                      <div
-                        className="h-1.5 rounded-full bg-gradient-to-r from-blue-500 to-blue-400"
-                        style={{ width: `${pct}%` }}
-                      ></div>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                    <span className="font-medium text-gray-200">{v.name}</span>
+                  </div>
+                  <span className="font-mono font-bold text-gray-200">${v.totalSpent.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-gray-500">{v.business}</span>
+                  <span className="font-mono text-blue-400">{v.totalCredits.toLocaleString()} credits</span>
+                </div>
+                <div className="flex justify-between items-center text-xs text-gray-500">
+                  <span>{v.invoiceCount} invoices (avg ${Math.round(avg).toLocaleString()})</span>
+                  <span>{v.lastActive ? new Date(v.lastActive).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '-'}</span>
+                </div>
+                <div className="w-full bg-gray-800 rounded-full h-1.5">
+                  <div
+                    className="h-1.5 rounded-full bg-gradient-to-r from-blue-500 to-blue-400"
+                    style={{ width: `${pct}%` }}
+                  ></div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Desktop: table layout */}
+        <div className="hidden sm:block overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-800 text-left text-xs text-gray-500 uppercase tracking-wider">
+                <th className="px-4 py-3 w-12">#</th>
+                <th className="px-4 py-3">Vendor</th>
+                <th className="px-4 py-3">Business</th>
+                <th className="px-4 py-3 text-right">Total Spent</th>
+                <th className="px-4 py-3 text-right">Credits Loaded</th>
+                <th className="px-4 py-3 text-right">Invoices</th>
+                <th className="px-4 py-3 text-right">Avg / Invoice</th>
+                <th className="px-4 py-3">Last Active</th>
+                <th className="px-4 py-3 w-32">Volume</th>
+              </tr>
+            </thead>
+            <tbody>
+              {vendors.map((v, i) => {
+                const pct = vendors[0].totalSpent > 0 ? (v.totalSpent / vendors[0].totalSpent) * 100 : 0;
+                const avg = v.invoiceCount > 0 ? v.totalSpent / v.invoiceCount : 0;
+                const isTop3 = i < 3;
+                return (
+                  <tr key={v.slug} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition">
+                    <td className="px-4 py-3">
+                      {isTop3 ? (
+                        <span className={`text-xs font-bold ${i === 0 ? 'text-yellow-400' : i === 1 ? 'text-gray-300' : 'text-amber-600'}`}>
+                          {i === 0 ? '\u{1F947}' : i === 1 ? '\u{1F948}' : '\u{1F949}'}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-600">{i + 1}</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 font-medium text-gray-200">{v.name}</td>
+                    <td className="px-4 py-3 text-xs text-gray-500">{v.business}</td>
+                    <td className="px-4 py-3 text-right font-mono text-gray-200">
+                      ${v.totalSpent.toLocaleString()}
+                    </td>
+                    <td className="px-4 py-3 text-right font-mono text-blue-400">
+                      {v.totalCredits.toLocaleString()}
+                    </td>
+                    <td className="px-4 py-3 text-right text-gray-400">{v.invoiceCount}</td>
+                    <td className="px-4 py-3 text-right text-xs text-gray-500">
+                      ${Math.round(avg).toLocaleString()}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-gray-500">
+                      {v.lastActive ? new Date(v.lastActive).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '-'}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="w-full bg-gray-800 rounded-full h-1.5">
+                        <div
+                          className="h-1.5 rounded-full bg-gradient-to-r from-blue-500 to-blue-400"
+                          style={{ width: `${pct}%` }}
+                        ></div>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
@@ -464,45 +551,78 @@ function CorrectionLog({ corrections }) {
   }
 
   return (
-    <div className="bg-[#161922] rounded-xl border border-gray-800 overflow-x-auto">
-      <table className="w-full text-sm min-w-[500px]">
-        <thead>
-          <tr className="border-b border-gray-800 text-left text-xs text-gray-500 uppercase tracking-wider">
-            <th className="px-4 py-3">#</th>
-            <th className="px-4 py-3">Vendor</th>
-            <th className="px-4 py-3">Accounts</th>
-            <th className="px-4 py-3 text-right">Total Credits</th>
-            <th className="px-4 py-3">Status</th>
-            <th className="px-4 py-3">Time</th>
-          </tr>
-        </thead>
-        <tbody>
-          {corrections.map((c) => {
-            const totalCredits = c.allocations.reduce((s, a) => s + a.credits, 0);
-            return (
-              <tr key={c.id} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition">
-                <td className="px-4 py-3 text-gray-500 font-mono text-xs">#{c.id}</td>
-                <td className="px-4 py-3 font-medium text-gray-200 capitalize">{c.vendorSlug}</td>
-                <td className="px-4 py-3">
-                  <div className="flex flex-wrap gap-1">
-                    {c.allocations.map((a, i) => (
-                      <span key={i} className="text-xs bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded">
-                        {a.username}: {a.credits.toLocaleString()}
-                      </span>
-                    ))}
-                  </div>
-                </td>
-                <td className="px-4 py-3 text-right font-mono text-gray-200">{totalCredits.toLocaleString()}</td>
-                <td className="px-4 py-3"><StatusBadge status={c.status} /></td>
-                <td className="px-4 py-3 text-xs text-gray-500">
-                  {new Date(c.submittedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}{' '}
-                  {new Date(c.submittedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+    <div className="bg-[#161922] rounded-xl border border-gray-800">
+      {/* Mobile: card layout */}
+      <div className="sm:hidden divide-y divide-gray-800/50">
+        {corrections.map((c) => {
+          const totalCredits = c.allocations.reduce((s, a) => s + a.credits, 0);
+          return (
+            <div key={c.id} className="px-4 py-3 space-y-2">
+              <div className="flex justify-between items-center">
+                <span className="font-medium text-gray-200 capitalize">{c.vendorSlug}</span>
+                <StatusBadge status={c.status} />
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="font-mono text-lg font-bold text-gray-200">{totalCredits.toLocaleString()} credits</span>
+                <span className="text-xs text-gray-500 font-mono">#{c.id}</span>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {c.allocations.map((a, i) => (
+                  <span key={i} className="text-xs bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded">
+                    {a.username}: {a.credits.toLocaleString()}
+                  </span>
+                ))}
+              </div>
+              <div className="text-xs text-gray-500">
+                {new Date(c.submittedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}{' '}
+                {new Date(c.submittedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Desktop: table layout */}
+      <div className="hidden sm:block overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-800 text-left text-xs text-gray-500 uppercase tracking-wider">
+              <th className="px-4 py-3">#</th>
+              <th className="px-4 py-3">Vendor</th>
+              <th className="px-4 py-3">Accounts</th>
+              <th className="px-4 py-3 text-right">Total Credits</th>
+              <th className="px-4 py-3">Status</th>
+              <th className="px-4 py-3">Time</th>
+            </tr>
+          </thead>
+          <tbody>
+            {corrections.map((c) => {
+              const totalCredits = c.allocations.reduce((s, a) => s + a.credits, 0);
+              return (
+                <tr key={c.id} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition">
+                  <td className="px-4 py-3 text-gray-500 font-mono text-xs">#{c.id}</td>
+                  <td className="px-4 py-3 font-medium text-gray-200 capitalize">{c.vendorSlug}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap gap-1">
+                      {c.allocations.map((a, i) => (
+                        <span key={i} className="text-xs bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded">
+                          {a.username}: {a.credits.toLocaleString()}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono text-gray-200">{totalCredits.toLocaleString()}</td>
+                  <td className="px-4 py-3"><StatusBadge status={c.status} /></td>
+                  <td className="px-4 py-3 text-xs text-gray-500">
+                    {new Date(c.submittedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}{' '}
+                    {new Date(c.submittedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
