@@ -8,6 +8,7 @@ const telegram = require('../services/telegram');
 const autoloader = require('../services/autoloader');
 const { validateInvoice, validateCorrection } = require('../services/validator');
 const prisma = require('../db/client');
+const creditLineService = require('../services/creditLineService');
 const { logger } = require('../services/logger');
 
 const uploadsDir = path.join(__dirname, '..', '..', 'uploads');
@@ -32,6 +33,7 @@ router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) =>
       body = JSON.parse(body.data);
     }
     const { vendorSlug, method, baseAmount, feeAmount, totalAmount, allocations } = body;
+    const creditLineRepaymentAmount = body.creditLineRepayment ? Number(body.creditLineRepayment) : 0;
 
     const vendor = await prisma.vendor.findUnique({
       where: { slug: vendorSlug },
@@ -49,9 +51,21 @@ router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) =>
       feeAmount: Number(feeAmount),
       totalAmount: Number(totalAmount),
       allocations: allocations.map((a) => ({ accountId: a.accountId, dollarAmount: Number(a.dollarAmount), credits: a.credits })),
+      creditLineRepayment: creditLineRepaymentAmount,
     });
     if (!validation.valid) {
       return res.status(400).json({ error: validation.error });
+    }
+
+    // Validate credit line repayment before creating invoice
+    if (creditLineRepaymentAmount > 0) {
+      const cl = await creditLineService.getCreditLine(vendor.id);
+      if (!cl) {
+        return res.status(400).json({ error: 'Vendor does not have a credit line' });
+      }
+      if (Number(cl.usedAmount) <= 0) {
+        return res.status(400).json({ error: 'Credit line has no outstanding balance to repay' });
+      }
     }
 
     // Create invoice in DB
@@ -93,6 +107,15 @@ router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) =>
         platform: alloc.vendorAccount.platform,
         username: alloc.vendorAccount.username,
         operatorId: alloc.vendorAccount.operatorId,
+      });
+    }
+
+    // Store credit line repayment intent if present
+    if (creditLineRepaymentAmount > 0) {
+      await prisma.setting.upsert({
+        where: { key: `credit_line_repayment_${invoice.id}` },
+        update: { value: String(creditLineRepaymentAmount) },
+        create: { key: `credit_line_repayment_${invoice.id}`, value: String(creditLineRepaymentAmount) },
       });
     }
 
