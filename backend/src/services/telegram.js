@@ -92,6 +92,30 @@ Amount: ${fmt(invoice.baseAmount)} + ${fmt(invoice.feeAmount)} fee`;
 // ── Credits Loaded ──
 
 async function sendLoaded(vendor, invoice, allocations) {
+  const isCorrection = invoice.method === 'Correction';
+
+  if (isCorrection) {
+    const targets = allocations
+      .filter((a) => a.credits > 0)
+      .map((a) => `${a.username} (${a.operatorId}) — ${a.credits.toLocaleString()} credits`)
+      .join('\n');
+
+    const mainMsg = `📋 CORRECTION COMPLETE 📋
+
+${vendor.name}
+
+Invoice ID: ${invoice.id}
+
+${targets}`;
+
+    await bot.sendMessage(ADMIN_CHAT_ID, mainMsg);
+
+    if (vendor.telegramChatId) {
+      await bot.sendMessage(vendor.telegramChatId, `📋 CORRECTION COMPLETE 📋\n\nCredits have been moved.\n\n${targets}`);
+    }
+    return;
+  }
+
   const mainMsg = `✅ LOADED ✅
 
 ${vendor.name}
