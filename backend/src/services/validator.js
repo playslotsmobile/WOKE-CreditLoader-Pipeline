@@ -1,7 +1,7 @@
-function validateInvoice({ vendor, method, baseAmount, feeAmount, totalAmount, allocations }) {
+function validateInvoice({ vendor, method, baseAmount, feeAmount, totalAmount, allocations, creditLineRepayment = 0 }) {
   if (baseAmount <= 0) return { valid: false, error: 'Base amount must be positive' };
 
-  if (method !== 'Wire' && baseAmount < 1000) {
+  if (method !== 'Wire' && method !== 'Credit Line' && baseAmount < 1000) {
     return { valid: false, error: `$1,000 minimum required for ${method}` };
   }
 
@@ -11,7 +11,7 @@ function validateInvoice({ vendor, method, baseAmount, feeAmount, totalAmount, a
     }
   }
 
-  const allocSum = allocations.reduce((s, a) => s + Number(a.dollarAmount), 0);
+  const allocSum = allocations.reduce((s, a) => s + Number(a.dollarAmount), 0) + creditLineRepayment;
   if (Math.abs(allocSum - Number(baseAmount)) > 0.01) {
     return { valid: false, error: `Allocation sum ($${allocSum.toFixed(2)}) does not match base amount ($${Number(baseAmount).toFixed(2)})` };
   }
