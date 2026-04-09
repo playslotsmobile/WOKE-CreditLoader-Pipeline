@@ -18,6 +18,7 @@ const vendors = [
       { platform: 'PLAY777', username: 'Bigboss79', operatorId: '2152', rate: 0.35 },
       { platform: 'ICONNECT', username: 'Andrea1979', operatorId: null, rate: 0.15 },
     ],
+    creditLine: { cap: 10000, used: 6000 },
   },
   {
     slug: 'karla', name: 'Karla Rivera', businessName: 'LFM SOFTWARE LLC',
@@ -33,6 +34,7 @@ const vendors = [
     accounts: [
       { platform: 'PLAY777', username: 'Lozano777', operatorId: '2982', rate: 0.30 },
     ],
+    creditLine: { cap: 5000, used: 5000 },
   },
   {
     slug: 'venisa', name: 'Venisa Vasquez', businessName: 'Venisa Vasquez',
@@ -47,6 +49,7 @@ const vendors = [
     accounts: [
       { platform: 'PLAY777', username: 'TEAM1115', operatorId: '1115', rate: 0.35 },
     ],
+    creditLine: { cap: 10000, used: 0 },
   },
   {
     slug: 'luis', name: 'Luis Salinas', businessName: 'SaraLeasing LLC',
@@ -181,6 +184,22 @@ async function seed() {
           });
         }
       }
+    }
+
+    // Create/update credit line if vendor has one
+    if (v.creditLine) {
+      await prisma.creditLine.upsert({
+        where: { vendorId: vendor.id },
+        update: {
+          capAmount: v.creditLine.cap,
+          usedAmount: v.creditLine.used,
+        },
+        create: {
+          vendorId: vendor.id,
+          capAmount: v.creditLine.cap,
+          usedAmount: v.creditLine.used,
+        },
+      });
     }
 
     console.log(`  ✓ ${v.name} (${v.accounts.length} accounts)`);
