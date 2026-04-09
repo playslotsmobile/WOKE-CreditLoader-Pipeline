@@ -278,11 +278,18 @@ router.get('/vendor-stats', async (req, res) => {
       },
     });
 
+    // Get credit line balances
+    const creditLines = await prisma.creditLine.findMany();
+    const clByVendor = Object.fromEntries(creditLines.map((cl) => [cl.vendorId, cl]));
+
     const stats = vendors.map((v) => {
-      const loadedInvoices = v.invoices.filter((i) => i.status === 'LOADED');
-      const allInvoices = v.invoices.filter((i) => i.method !== 'Correction');
-      const totalSpent = allInvoices.reduce((s, i) => s + Number(i.baseAmount), 0);
-      const totalCredits = allInvoices.reduce(
+      const paidInvoices = v.invoices.filter((i) => i.method !== 'Correction' && i.method !== 'Credit Line');
+      const creditLineInvoices = v.invoices.filter((i) => i.method === 'Credit Line');
+      const allNonCorrection = v.invoices.filter((i) => i.method !== 'Correction');
+
+      const totalRevenue = paidInvoices.reduce((s, i) => s + Number(i.baseAmount), 0);
+      const totalCreditLineDrawn = creditLineInvoices.reduce((s, i) => s + Number(i.baseAmount), 0);
+      const totalCredits = allNonCorrection.reduce(
         (s, i) => s + i.allocations.reduce((a, al) => a + al.credits, 0),
         0
       );
@@ -292,19 +299,26 @@ router.get('/vendor-stats', async (req, res) => {
           )
         : null;
 
+      const cl = clByVendor[v.id];
+      const creditLineOwed = cl ? Number(cl.usedAmount) : 0;
+      const creditLineCap = cl ? Number(cl.capAmount) : 0;
+
       return {
         slug: v.slug,
         name: v.name,
         business: v.businessName,
-        totalSpent,
+        totalSpent: totalRevenue,
+        totalCreditLine: totalCreditLineDrawn,
+        creditLineOwed,
+        creditLineCap,
         totalCredits,
-        invoiceCount: allInvoices.length,
-        loadedCount: loadedInvoices.length,
+        invoiceCount: paidInvoices.length,
+        creditLineCount: creditLineInvoices.length,
         lastActive: lastInvoice?.submittedAt || null,
       };
     })
-    .filter((v) => v.invoiceCount > 0)
-    .sort((a, b) => b.totalSpent - a.totalSpent);
+    .filter((v) => v.invoiceCount > 0 || v.creditLineCount > 0)
+    .sort((a, b) => (b.totalSpent + b.totalCreditLine) - (a.totalSpent + a.totalCreditLine));
 
     res.json(stats);
   } catch (err) {

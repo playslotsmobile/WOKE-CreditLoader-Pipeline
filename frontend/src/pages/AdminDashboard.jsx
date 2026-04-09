@@ -414,15 +414,22 @@ function VendorLeaderboard({ vendors }) {
   const totalSpentAll = vendors.reduce((s, v) => s + v.totalSpent, 0);
   const totalCreditsAll = vendors.reduce((s, v) => s + v.totalCredits, 0);
   const totalInvoicesAll = vendors.reduce((s, v) => s + v.invoiceCount, 0);
+  const totalOwedAll = vendors.reduce((s, v) => s + (v.creditLineOwed || 0), 0);
+
+  function fmtCompact(n) {
+    if (n >= 1000) return `$${(n / 1000).toFixed(1)}k`;
+    return `$${n.toLocaleString()}`;
+  }
 
   return (
     <div>
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-6">
-        <SummaryCard label="Total Revenue" value={totalSpentAll >= 1000 ? `$${(totalSpentAll / 1000).toFixed(1)}k` : `$${totalSpentAll.toLocaleString()}`} sub="All vendors" color="text-green-400" />
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 sm:gap-4 mb-6">
+        <SummaryCard label="Total Revenue" value={fmtCompact(totalSpentAll)} sub="Paid invoices" color="text-green-400" />
+        <SummaryCard label="Total Owed" value={fmtCompact(totalOwedAll)} sub="Credit line balance" color={totalOwedAll > 0 ? 'text-orange-400' : 'text-gray-500'} />
         <SummaryCard label="Total Credits" value={totalCreditsAll >= 1000000 ? (totalCreditsAll / 1000000).toFixed(2) + 'M' : totalCreditsAll.toLocaleString()} sub="Loaded lifetime" color="text-blue-400" />
-        <SummaryCard label="Total Invoices" value={totalInvoicesAll} sub="All time" color="text-purple-400" />
-        <SummaryCard label="Active Vendors" value={vendors.length} sub="With invoices" color="text-amber-400" />
+        <SummaryCard label="Total Invoices" value={totalInvoicesAll} sub="Paid only" color="text-purple-400" />
+        <SummaryCard label="Active Vendors" value={vendors.length} sub="With activity" color="text-amber-400" />
       </div>
 
       {/* Leaderboard */}
@@ -430,7 +437,9 @@ function VendorLeaderboard({ vendors }) {
         {/* Mobile: card layout */}
         <div className="sm:hidden divide-y divide-gray-800/50">
           {vendors.map((v, i) => {
-            const pct = vendors[0].totalSpent > 0 ? (v.totalSpent / vendors[0].totalSpent) * 100 : 0;
+            const topSpent = vendors[0].totalSpent + vendors[0].totalCreditLine;
+            const myTotal = v.totalSpent + (v.totalCreditLine || 0);
+            const pct = topSpent > 0 ? (myTotal / topSpent) * 100 : 0;
             const avg = v.invoiceCount > 0 ? v.totalSpent / v.invoiceCount : 0;
             const isTop3 = i < 3;
             return (
@@ -444,14 +453,20 @@ function VendorLeaderboard({ vendors }) {
                     )}
                     <span className="font-medium text-gray-200">{v.name}</span>
                   </div>
-                  <span className="font-mono font-bold text-gray-200">${v.totalSpent.toLocaleString()}</span>
+                  <span className="font-mono font-bold text-green-400">${v.totalSpent.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between items-center text-xs">
                   <span className="text-gray-500">{v.business}</span>
                   <span className="font-mono text-blue-400">{v.totalCredits.toLocaleString()} credits</span>
                 </div>
+                {(v.creditLineOwed > 0 || v.totalCreditLine > 0) && (
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-orange-400">Owes: <span className="font-mono font-bold">${(v.creditLineOwed || 0).toLocaleString()}</span></span>
+                    <span className="text-gray-500">CL drawn: ${(v.totalCreditLine || 0).toLocaleString()}</span>
+                  </div>
+                )}
                 <div className="flex justify-between items-center text-xs text-gray-500">
-                  <span>{v.invoiceCount} invoices (avg ${Math.round(avg).toLocaleString()})</span>
+                  <span>{v.invoiceCount} invoices{v.invoiceCount > 0 ? ` (avg $${Math.round(avg).toLocaleString()})` : ''}</span>
                   <span>{v.lastActive ? new Date(v.lastActive).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '-'}</span>
                 </div>
                 <div className="w-full bg-gray-800 rounded-full h-1.5">
@@ -473,18 +488,19 @@ function VendorLeaderboard({ vendors }) {
                 <th className="px-4 py-3 w-12">#</th>
                 <th className="px-4 py-3">Vendor</th>
                 <th className="px-4 py-3">Business</th>
-                <th className="px-4 py-3 text-right">Total Spent</th>
-                <th className="px-4 py-3 text-right">Credits Loaded</th>
+                <th className="px-4 py-3 text-right">Revenue</th>
+                <th className="px-4 py-3 text-right">Owed</th>
+                <th className="px-4 py-3 text-right">Credits</th>
                 <th className="px-4 py-3 text-right">Invoices</th>
-                <th className="px-4 py-3 text-right">Avg / Invoice</th>
                 <th className="px-4 py-3">Last Active</th>
                 <th className="px-4 py-3 w-32">Volume</th>
               </tr>
             </thead>
             <tbody>
               {vendors.map((v, i) => {
-                const pct = vendors[0].totalSpent > 0 ? (v.totalSpent / vendors[0].totalSpent) * 100 : 0;
-                const avg = v.invoiceCount > 0 ? v.totalSpent / v.invoiceCount : 0;
+                const topTotal = vendors[0].totalSpent + (vendors[0].totalCreditLine || 0);
+                const myTotal = v.totalSpent + (v.totalCreditLine || 0);
+                const pct = topTotal > 0 ? (myTotal / topTotal) * 100 : 0;
                 const isTop3 = i < 3;
                 return (
                   <tr key={v.slug} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition">
@@ -499,16 +515,16 @@ function VendorLeaderboard({ vendors }) {
                     </td>
                     <td className="px-4 py-3 font-medium text-gray-200">{v.name}</td>
                     <td className="px-4 py-3 text-xs text-gray-500">{v.business}</td>
-                    <td className="px-4 py-3 text-right font-mono text-gray-200">
+                    <td className="px-4 py-3 text-right font-mono text-green-400">
                       ${v.totalSpent.toLocaleString()}
+                    </td>
+                    <td className={`px-4 py-3 text-right font-mono ${(v.creditLineOwed || 0) > 0 ? 'text-orange-400' : 'text-gray-600'}`}>
+                      {(v.creditLineOwed || 0) > 0 ? `$${v.creditLineOwed.toLocaleString()}` : '-'}
                     </td>
                     <td className="px-4 py-3 text-right font-mono text-blue-400">
                       {v.totalCredits.toLocaleString()}
                     </td>
                     <td className="px-4 py-3 text-right text-gray-400">{v.invoiceCount}</td>
-                    <td className="px-4 py-3 text-right text-xs text-gray-500">
-                      ${Math.round(avg).toLocaleString()}
-                    </td>
                     <td className="px-4 py-3 text-xs text-gray-500">
                       {v.lastActive ? new Date(v.lastActive).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '-'}
                     </td>
