@@ -3,6 +3,7 @@ const iconnect = require('./iconnect');
 const telegram = require('./telegram');
 const prisma = require('../db/client');
 const { logger } = require('./logger');
+const creditLineService = require('./creditLineService');
 
 const DRY_RUN = process.env.DRY_RUN === 'true';
 const MAX_RETRIES = 3;
@@ -66,6 +67,26 @@ async function processInvoiceInternal(invoiceId, retryCount = 0) {
   });
 
   if (!invoice) throw new Error('Invoice not found');
+
+  // Re-check credit line balance before loading (race condition guard)
+  if (invoice.method === 'Credit Line') {
+    const cl = await creditLineService.getCreditLine(invoice.vendorId);
+    if (!cl) {
+      logger.error('Credit line not found for credit line invoice', { invoiceId });
+      await prisma.invoice.update({ where: { id: invoiceId }, data: { status: 'FAILED' } });
+      return;
+    }
+    // The draw was already recorded, so we just verify usedAmount hasn't exceeded cap
+    if (Number(cl.usedAmount) > Number(cl.capAmount)) {
+      logger.error('Credit line over-drawn, blocking load', {
+        invoiceId,
+        usedAmount: Number(cl.usedAmount),
+        capAmount: Number(cl.capAmount),
+      });
+      await prisma.invoice.update({ where: { id: invoiceId }, data: { status: 'FAILED' } });
+      return;
+    }
+  }
 
   const isCorrection = invoice.method === 'Correction';
 
