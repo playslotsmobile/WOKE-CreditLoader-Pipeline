@@ -32,7 +32,7 @@ app.get('/api/vendors/:slug', async (req, res) => {
   try {
     const vendor = await prisma.vendor.findUnique({
       where: { slug: req.params.slug },
-      include: { accounts: true },
+      include: { accounts: true, creditLine: true },
     });
     if (!vendor) return res.status(404).json({ error: 'Vendor not found' });
 
@@ -55,6 +55,11 @@ app.get('/api/vendors/:slug', async (req, res) => {
         chainToAccId: a.chainToAccId,
         parentVendorAccId: a.parentVendorAccId,
       })),
+      creditLine: vendor.creditLine ? {
+        capAmount: Number(vendor.creditLine.capAmount),
+        usedAmount: Number(vendor.creditLine.usedAmount),
+        availableAmount: Number(vendor.creditLine.capAmount) - Number(vendor.creditLine.usedAmount),
+      } : null,
     });
   } catch (err) {
     logger.error('Vendor lookup error', { error: err });
