@@ -161,6 +161,15 @@ async function fillDepositModal(page, credits, transactionType = 'deposit', jobI
     ], 'Correct button');
     await correctBtn.click();
     await humanDelay(1500, 3000);
+
+    // Must click "Confirm Correction" on the confirmation popup
+    const confirmCorrBtn = await findElement(page, [
+      'button:has-text("Confirm Correction")',
+      '.swal2-confirm',
+      'button.btn-primary:has-text("Confirm")',
+    ], 'Confirm Correction button');
+    await humanDelay(1000, 2000);
+    await confirmCorrBtn.click();
   } else {
     const depositBtn = await findElement(modal, [
       '.modal-footer button:has-text("Deposit")',
@@ -183,10 +192,8 @@ async function fillDepositModal(page, credits, transactionType = 'deposit', jobI
     await page.waitForSelector('.toast-success, .alert-success, .swal2-success, [class*="success"]', { timeout: 15000 });
     return true;
   } catch {
-    const modalStillOpen = await form.isVisible().catch(() => false);
-    if (!modalStillOpen) return true;
     await captureFailure(page, jobId, 'DEPOSIT_CONFIRM_FAILED');
-    throw new Error('Deposit confirmation did not complete');
+    throw new Error(`${transactionType === 'correction' ? 'Correction' : 'Deposit'} confirmation did not complete — no success indicator found`);
   }
 }
 
