@@ -55,6 +55,9 @@ export default function VendorForm() {
   const [correctionSubmitted, setCorrectionSubmitted] = useState(false);
   const [correctionSubmitting, setCorrectionSubmitting] = useState(false);
 
+  // Credit line repayment state (in invoice tab)
+  const [clRepayment, setClRepayment] = useState('');
+
   // Credit line state
   const [clAmount, setClAmount] = useState('');
   const [clAllocations, setClAllocations] = useState({});
@@ -78,10 +81,12 @@ export default function VendorForm() {
   useEffect(() => {
     setBaseAmount('');
     setAllocations({});
+    setClRepayment('');
   }, [method]);
 
   useEffect(() => {
     setAllocations({});
+    setClRepayment('');
   }, [baseAmount]);
 
   const allAccounts = vendor?.accounts || [];
@@ -140,9 +145,11 @@ export default function VendorForm() {
   const feeAmount = +(base * feeRate).toFixed(2);
   const totalAmount = +(base + feeAmount).toFixed(2);
 
+  const clRepaymentAmount = parseFloat(clRepayment) || 0;
+
   const allocTotal = invoiceAccounts.reduce((sum, acct) => {
     return sum + (parseFloat(allocations[acct.id]) || 0);
-  }, 0);
+  }, 0) + clRepaymentAmount;
   const splitTotal = +allocTotal.toFixed(2);
   const splitValid = base > 0 && splitTotal === base;
 
@@ -199,6 +206,7 @@ export default function VendorForm() {
         feeAmount,
         totalAmount,
         allocations: accountAllocations,
+        creditLineRepayment: clRepaymentAmount > 0 ? clRepaymentAmount : undefined,
       };
 
       if (isWire && wireReceipt) {
@@ -536,6 +544,30 @@ export default function VendorForm() {
                         </div>
                       );
                     })}
+                  </div>
+                )}
+
+                {/* Credit Line Repayment row */}
+                {base > 0 && hasCreditLineTab && creditLine.usedAmount > 0 && (
+                  <div className="mb-6">
+                    <div className="p-4 rounded-lg border border-blue-200 bg-blue-50">
+                      <Label>Credit Line Repayment</Label>
+                      <input
+                        type="number"
+                        min="0"
+                        max={Math.min(base, creditLine.usedAmount)}
+                        step="0.01"
+                        value={clRepayment}
+                        onChange={(e) => setClRepayment(e.target.value)}
+                        placeholder="Amount ($)"
+                        className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <HelpText>
+                        Allocate toward your credit line balance. Currently{' '}
+                        <strong>{fmt(creditLine.usedAmount)}</strong> /{' '}
+                        <strong>{fmt(creditLine.capAmount)}</strong> used.
+                      </HelpText>
+                    </div>
                   </div>
                 )}
 
