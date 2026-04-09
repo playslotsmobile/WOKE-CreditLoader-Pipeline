@@ -19,8 +19,41 @@ model Vendor {
 
   accounts VendorAccount[]
   invoices Invoice[]
+  creditLine CreditLine?
 
   @@map("vendors")
+}
+
+model CreditLine {
+  id         Int      @id @default(autoincrement())
+  vendorId   Int      @unique @map("vendor_id")
+  capAmount  Decimal  @map("cap_amount") @db.Decimal(10, 2)
+  usedAmount Decimal  @default(0) @map("used_amount") @db.Decimal(10, 2)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  vendor       Vendor                  @relation(fields: [vendorId], references: [id])
+  transactions CreditLineTransaction[]
+
+  @@map("credit_lines")
+}
+
+model CreditLineTransaction {
+  id            Int      @id @default(autoincrement())
+  creditLineId  Int      @map("credit_line_id")
+  invoiceId     Int      @map("invoice_id")
+  type          String   // "DRAW" or "REPAYMENT"
+  amount        Decimal  @db.Decimal(10, 2)
+  balanceBefore Decimal  @map("balance_before") @db.Decimal(10, 2)
+  balanceAfter  Decimal  @map("balance_after") @db.Decimal(10, 2)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  creditLine CreditLine @relation(fields: [creditLineId], references: [id])
+  invoice    Invoice    @relation(fields: [invoiceId], references: [id])
+
+  @@index([creditLineId])
+  @@index([invoiceId])
+  @@map("credit_line_transactions")
 }
 
 enum Platform {
@@ -70,9 +103,10 @@ model Invoice {
   paidAt      DateTime?     @map("paid_at")
   loadedAt    DateTime?     @map("loaded_at")
 
-  vendor      Vendor              @relation(fields: [vendorId], references: [id])
-  allocations InvoiceAllocation[]
-  loadJobs    LoadJob[]
+  vendor                 Vendor              @relation(fields: [vendorId], references: [id])
+  allocations            InvoiceAllocation[]
+  loadJobs               LoadJob[]
+  creditLineTransactions CreditLineTransaction[]
 
   @@index([qbInvoiceId])
   @@index([vendorId])
