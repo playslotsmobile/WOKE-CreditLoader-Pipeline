@@ -55,6 +55,13 @@ export default function VendorForm() {
   const [correctionSubmitted, setCorrectionSubmitted] = useState(false);
   const [correctionSubmitting, setCorrectionSubmitting] = useState(false);
 
+  // Credit line state
+  const [clAmount, setClAmount] = useState('');
+  const [clAllocations, setClAllocations] = useState({});
+  const [clSubmitted, setClSubmitted] = useState(false);
+  const [clSubmitting, setClSubmitting] = useState(false);
+  const [clConfirming, setClConfirming] = useState(false);
+
   useEffect(() => {
     axios
       .get(`/api/vendors/${vendorSlug}`)
@@ -88,6 +95,36 @@ export default function VendorForm() {
     (a) => a.loadType === 'correction'
   );
   const hasCorrectionTab = correctionAccounts.length > 0;
+
+  // Credit line
+  const creditLine = vendor?.creditLine || null;
+  const hasCreditLineTab = creditLine !== null;
+  const clAvailable = creditLine ? creditLine.availableAmount : 0;
+  const clBase = parseFloat(clAmount) || 0;
+
+  const clAllocTotal = invoiceAccounts.reduce((sum, acct) => {
+    return sum + (parseFloat(clAllocations[acct.id]) || 0);
+  }, 0);
+  const clSplitTotal = +clAllocTotal.toFixed(2);
+  const clSplitValid = clBase > 0 && clSplitTotal === clBase;
+  const clOverLimit = clBase > clAvailable;
+
+  function getClCredits(acct) {
+    const amt = parseFloat(clAllocations[acct.id]) || 0;
+    const rate = parseFloat(acct.rate);
+    if (!amt || !rate) return 0;
+    return Math.round(amt / rate);
+  }
+
+  function setClAllocation(accountId, value) {
+    setClAllocations((prev) => ({ ...prev, [accountId]: value }));
+  }
+
+  const hasAnyClAllocation = invoiceAccounts.some(
+    (acct) => (parseFloat(clAllocations[acct.id]) || 0) > 0
+  );
+
+  const canSubmitCl = clBase > 0 && clSplitValid && !clOverLimit && !clSubmitting && clAvailable > 0;
 
   // Invoice calculations
   const config = METHOD_CONFIG[method];
@@ -219,6 +256,42 @@ export default function VendorForm() {
     }
   }
 
+  async function handleCreditLineSubmit(e) {
+    e.preventDefault();
+    if (!canSubmitCl) return;
+
+    if (!clConfirming) {
+      setClConfirming(true);
+      return;
+    }
+
+    setClSubmitting(true);
+    try {
+      const clAccountAllocations = invoiceAccounts
+        .map((acct) => ({
+          accountId: acct.id,
+          platform: acct.platform,
+          username: acct.username,
+          operatorId: acct.operatorId,
+          dollarAmount: parseFloat(clAllocations[acct.id]) || 0,
+          credits: getClCredits(acct),
+        }))
+        .filter((a) => a.dollarAmount > 0);
+
+      await axios.post('/api/submit-credit-line', {
+        vendorSlug,
+        baseAmount: clBase,
+        allocations: clAccountAllocations,
+      });
+      setClSubmitted(true);
+    } catch (err) {
+      alert(err.response?.data?.error || 'Credit line request failed. Please try again.');
+      setClConfirming(false);
+    } finally {
+      setClSubmitting(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -267,7 +340,7 @@ export default function VendorForm() {
           </h1>
 
           {/* Tabs */}
-          {hasCorrectionTab && (
+          {(hasCorrectionTab || hasCreditLineTab) && (
             <div className="flex border-b border-gray-200 mb-8">
               <button
                 type="button"
@@ -280,17 +353,32 @@ export default function VendorForm() {
               >
                 Invoice
               </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('corrections')}
-                className={`px-6 py-3 text-sm font-semibold border-b-2 transition ${
-                  activeTab === 'corrections'
-                    ? 'border-amber-700 text-amber-700'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                Corrections
-              </button>
+              {hasCorrectionTab && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('corrections')}
+                  className={`px-6 py-3 text-sm font-semibold border-b-2 transition ${
+                    activeTab === 'corrections'
+                      ? 'border-amber-700 text-amber-700'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  Corrections
+                </button>
+              )}
+              {hasCreditLineTab && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('creditLine')}
+                  className={`px-6 py-3 text-sm font-semibold border-b-2 transition ${
+                    activeTab === 'creditLine'
+                      ? 'border-amber-700 text-amber-700'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  Request Credit Line
+                </button>
+              )}
             </div>
           )}
 
@@ -595,6 +683,191 @@ export default function VendorForm() {
                       ? 'Submitting...'
                       : 'Submit Correction'}
                   </button>
+                </form>
+              )}
+            </>
+          )}
+
+          {/* ============ CREDIT LINE TAB ============ */}
+          {activeTab === 'creditLine' && hasCreditLineTab && (
+            <>
+              {clSubmitted ? (
+                <div className="text-center py-12">
+                  <div className="text-green-600 text-5xl mb-4">&#10003;</div>
+                  <h2 className="text-2xl font-bold mb-2">Credit Line Request Submitted</h2>
+                  <p className="text-gray-600">
+                    Your credit line request has been submitted. Credits will be loaded shortly.
+                  </p>
+                </div>
+              ) : (
+                <form onSubmit={handleCreditLineSubmit}>
+                  {/* Credit Line Status */}
+                  <div className="mb-6 p-4 rounded-lg border bg-gray-50 border-gray-200">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-sm font-semibold text-gray-700">Credit Line</span>
+                      <span className={`text-sm font-bold ${clAvailable > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {fmt(clAvailable)} available
+                      </span>
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-3">
+                      <div
+                        className={`h-3 rounded-full transition-all ${
+                          creditLine.usedAmount / creditLine.capAmount > 0.8
+                            ? 'bg-red-500'
+                            : creditLine.usedAmount / creditLine.capAmount > 0.5
+                            ? 'bg-yellow-500'
+                            : 'bg-green-500'
+                        }`}
+                        style={{ width: `${(creditLine.usedAmount / creditLine.capAmount) * 100}%` }}
+                      ></div>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {fmt(creditLine.usedAmount)} used of {fmt(creditLine.capAmount)} total
+                    </p>
+                  </div>
+
+                  {clAvailable <= 0 ? (
+                    <div className="text-center py-8">
+                      <p className="text-red-600 font-semibold text-lg mb-2">
+                        Credit line fully used — {fmt(0)} of {fmt(creditLine.capAmount)} available
+                      </p>
+                      <p className="text-gray-500 text-sm">
+                        Submit an invoice with a Credit Line Repayment allocation to free up balance.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Amount */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-6">
+                        <div>
+                          <Label required>Amount ($)</Label>
+                          <input
+                            type="number"
+                            min="1"
+                            max={clAvailable}
+                            step="0.01"
+                            value={clAmount}
+                            onChange={(e) => {
+                              setClAmount(e.target.value);
+                              setClAllocations({});
+                              setClConfirming(false);
+                            }}
+                            placeholder={`Up to ${fmt(clAvailable)}`}
+                            className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                          <HelpText>
+                            Maximum: <strong>{fmt(clAvailable)}</strong>. No fees applied.
+                          </HelpText>
+                        </div>
+                      </div>
+
+                      {clOverLimit && (
+                        <div className="mb-6 text-sm text-red-600">
+                          Amount exceeds available credit line of {fmt(clAvailable)}.
+                        </div>
+                      )}
+
+                      {/* Account allocation */}
+                      {clBase > 0 && !clOverLimit && (
+                        <div className={`grid ${colClass} gap-4 sm:gap-6 mb-6`}>
+                          {invoiceAccounts.map((acct) => (
+                            <div key={acct.id}>
+                              <Label required>{accountLabel(acct)}</Label>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={clAllocations[acct.id] || ''}
+                                onChange={(e) => {
+                                  setClAllocation(acct.id, e.target.value);
+                                  setClConfirming(false);
+                                }}
+                                placeholder="Amount ($)"
+                                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              />
+                              <HelpText>
+                                Enter amount in <strong>dollars ($)</strong> for{' '}
+                                <strong>{acct.platform === 'PLAY777' ? 'Play777' : 'IConnect'}</strong>.
+                              </HelpText>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Split validation */}
+                      {clBase > 0 && hasAnyClAllocation && !clSplitValid && (
+                        <div className="mb-6 text-sm text-red-600">
+                          The amounts must total {fmt(clBase)}. Current total: {fmt(clSplitTotal)}.
+                        </div>
+                      )}
+
+                      {/* Credits preview */}
+                      {clSplitValid && (
+                        <div className={`grid ${colClass} gap-4 sm:gap-6 mb-6`}>
+                          {invoiceAccounts.map((acct) => {
+                            const amt = parseFloat(clAllocations[acct.id]) || 0;
+                            if (amt <= 0) return null;
+                            const credits = getClCredits(acct);
+                            const rate = parseFloat(acct.rate);
+                            return (
+                              <div key={acct.id}>
+                                <p className="text-sm font-semibold text-gray-900">
+                                  Credits ({accountLabel(acct)})
+                                </p>
+                                <p className="text-lg font-bold text-gray-900">
+                                  {credits.toLocaleString()}
+                                </p>
+                                <HelpText>
+                                  <strong>Credits</strong> at{' '}
+                                  <strong>{(rate * 100).toFixed(0)}% rate</strong>.
+                                </HelpText>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* Confirmation screen */}
+                      {clConfirming && clSplitValid && (
+                        <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-md">
+                          <p className="text-sm font-semibold text-amber-800 mb-2">
+                            Confirm Credit Line Request
+                          </p>
+                          <div className="text-sm text-amber-700 space-y-1">
+                            <p>Amount: <strong>{fmt(clBase)}</strong></p>
+                            {invoiceAccounts.map((acct) => {
+                              const amt = parseFloat(clAllocations[acct.id]) || 0;
+                              if (amt <= 0) return null;
+                              return (
+                                <p key={acct.id}>
+                                  {accountLabel(acct)}: {fmt(amt)} — {getClCredits(acct).toLocaleString()} credits
+                                </p>
+                              );
+                            })}
+                            <p className="mt-2 pt-2 border-t border-amber-300">
+                              Remaining after request: <strong>{fmt(clAvailable - clBase)}</strong>
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      <button
+                        type="submit"
+                        disabled={!canSubmitCl}
+                        className={`w-full sm:w-auto px-8 py-3 rounded-md text-white font-semibold transition ${
+                          canSubmitCl
+                            ? 'bg-amber-700 hover:bg-amber-800 cursor-pointer'
+                            : 'bg-gray-300 cursor-not-allowed'
+                        }`}
+                      >
+                        {clSubmitting
+                          ? 'Submitting...'
+                          : clConfirming
+                          ? 'Confirm Request'
+                          : 'Request Credit Line'}
+                      </button>
+                    </>
+                  )}
                 </form>
               )}
             </>
