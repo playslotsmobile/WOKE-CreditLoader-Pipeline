@@ -546,7 +546,7 @@ function CreditLinesView({ creditLines, transactions, vendorFilter, onVendorFilt
       </div>
 
       {/* Transaction History */}
-      <div className="bg-[#161922] rounded-xl border border-gray-800 overflow-x-auto">
+      <div className="bg-[#161922] rounded-xl border border-gray-800">
         <div className="flex justify-between items-center px-4 py-3 border-b border-gray-800">
           <h3 className="text-sm font-semibold text-gray-300">
             Transaction History
@@ -561,33 +561,17 @@ function CreditLinesView({ creditLines, transactions, vendorFilter, onVendorFilt
             </button>
           )}
         </div>
-        <table className="w-full text-sm min-w-[640px]">
-          <thead>
-            <tr className="border-b border-gray-800 text-left text-xs text-gray-500 uppercase tracking-wider">
-              <th className="px-4 py-3">Date</th>
-              <th className="px-4 py-3">Vendor</th>
-              <th className="px-4 py-3">Type</th>
-              <th className="px-4 py-3 text-right">Amount</th>
-              <th className="px-4 py-3 text-right">Balance After</th>
-              <th className="px-4 py-3">Invoice</th>
-            </tr>
-          </thead>
-          <tbody>
-            {transactions.length === 0 ? (
-              <tr>
-                <td colSpan="6" className="px-4 py-8 text-center text-gray-500">
-                  No transactions yet.
-                </td>
-              </tr>
-            ) : (
-              transactions.map((t) => (
-                <tr key={t.id} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition">
-                  <td className="px-4 py-3 text-xs text-gray-500">
-                    {new Date(t.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}{' '}
-                    {new Date(t.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </td>
-                  <td className="px-4 py-3 font-medium text-gray-200 capitalize">{t.vendorName}</td>
-                  <td className="px-4 py-3">
+
+        {transactions.length === 0 ? (
+          <p className="px-4 py-8 text-center text-gray-500">No transactions yet.</p>
+        ) : (
+          <>
+            {/* Mobile: card layout */}
+            <div className="sm:hidden divide-y divide-gray-800/50">
+              {transactions.map((t) => (
+                <div key={t.id} className="px-4 py-3 space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="font-medium text-gray-200 capitalize">{t.vendorName}</span>
                     <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${
                       t.type === 'DRAW'
                         ? 'bg-orange-500/15 text-orange-400 border-orange-500/30'
@@ -595,23 +579,76 @@ function CreditLinesView({ creditLines, transactions, vendorFilter, onVendorFilt
                     }`}>
                       {t.type}
                     </span>
-                  </td>
-                  <td className={`px-4 py-3 text-right font-mono ${
-                    t.type === 'DRAW' ? 'text-orange-400' : 'text-green-400'
-                  }`}>
-                    {t.type === 'DRAW' ? '-' : '+'}{fmtUsd(t.amount)}
-                  </td>
-                  <td className="px-4 py-3 text-right font-mono text-gray-300">
-                    {fmtUsd(t.balanceAfter)}
-                  </td>
-                  <td className="px-4 py-3 text-gray-500 font-mono text-xs">
-                    #{t.invoiceId}
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className={`font-mono text-lg font-bold ${
+                      t.type === 'DRAW' ? 'text-orange-400' : 'text-green-400'
+                    }`}>
+                      {t.type === 'DRAW' ? '-' : '+'}{fmtUsd(t.amount)}
+                    </span>
+                    <span className="text-xs text-gray-500">
+                      Balance: <span className="font-mono text-gray-300">{fmtUsd(t.balanceAfter)}</span>
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs text-gray-500">
+                    <span>
+                      {new Date(t.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}{' '}
+                      {new Date(t.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                    <span className="font-mono">#{t.invoiceId}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop: table layout */}
+            <div className="hidden sm:block overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-800 text-left text-xs text-gray-500 uppercase tracking-wider">
+                    <th className="px-4 py-3">Date</th>
+                    <th className="px-4 py-3">Vendor</th>
+                    <th className="px-4 py-3">Type</th>
+                    <th className="px-4 py-3 text-right">Amount</th>
+                    <th className="px-4 py-3 text-right">Balance After</th>
+                    <th className="px-4 py-3">Invoice</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {transactions.map((t) => (
+                    <tr key={t.id} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition">
+                      <td className="px-4 py-3 text-xs text-gray-500">
+                        {new Date(t.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}{' '}
+                        {new Date(t.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </td>
+                      <td className="px-4 py-3 font-medium text-gray-200 capitalize">{t.vendorName}</td>
+                      <td className="px-4 py-3">
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${
+                          t.type === 'DRAW'
+                            ? 'bg-orange-500/15 text-orange-400 border-orange-500/30'
+                            : 'bg-green-500/15 text-green-400 border-green-500/30'
+                        }`}>
+                          {t.type}
+                        </span>
+                      </td>
+                      <td className={`px-4 py-3 text-right font-mono ${
+                        t.type === 'DRAW' ? 'text-orange-400' : 'text-green-400'
+                      }`}>
+                        {t.type === 'DRAW' ? '-' : '+'}{fmtUsd(t.amount)}
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono text-gray-300">
+                        {fmtUsd(t.balanceAfter)}
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 font-mono text-xs">
+                        #{t.invoiceId}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
