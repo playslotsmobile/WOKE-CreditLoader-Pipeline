@@ -3,6 +3,7 @@ const quickbooks = require('./quickbooks');
 const autoloader = require('./autoloader');
 const telegram = require('./telegram');
 const { logger } = require('./logger');
+const creditLineService = require('./creditLineService');
 
 const MAX_ATTEMPTS = 3;
 
@@ -136,6 +137,39 @@ async function handlePayment(paymentId, log) {
         { totalAmount: invoice.totalAmount, id: invoice.id }
       );
     } catch {}
+
+    // Check for credit line repayment
+    try {
+      const repaymentSetting = await prisma.setting.findUnique({
+        where: { key: `credit_line_repayment_${invoice.id}` },
+      });
+      if (repaymentSetting) {
+        const repaymentAmount = Number(repaymentSetting.value);
+        if (repaymentAmount > 0) {
+          await creditLineService.recordRepayment(invoice.vendorId, invoice.id, repaymentAmount);
+
+          // Get updated balance for notification
+          const cl = await creditLineService.getCreditLine(invoice.vendorId);
+
+          await telegram.sendCreditLineRepayment(
+            { name: invoice.vendor.name, telegramChatId: invoice.vendor.telegramChatId },
+            repaymentAmount,
+            { usedAmount: Number(cl.usedAmount), capAmount: Number(cl.capAmount) }
+          );
+
+          // Clean up the setting
+          await prisma.setting.delete({ where: { key: `credit_line_repayment_${invoice.id}` } });
+
+          log.info('Credit line repayment processed', {
+            invoiceId: invoice.id,
+            vendorId: invoice.vendorId,
+            repaymentAmount,
+          });
+        }
+      }
+    } catch (clErr) {
+      log.error('Credit line repayment processing failed', { error: clErr, invoiceId: invoice.id });
+    }
 
     autoloader.processInvoice(invoice.id).catch(async (err) => {
       log.error('Auto-loader failed', { invoiceId: invoice.id, error: err });
