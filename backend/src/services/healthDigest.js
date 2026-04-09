@@ -26,6 +26,13 @@ async function sendDailyDigest() {
       adspowerOk = data.code === 0;
     } catch {}
 
+    const quickbooks = require('./quickbooks');
+    let qbOk = false;
+    try {
+      await quickbooks.qbRequest('GET', 'query?query=SELECT * FROM CompanyInfo');
+      qbOk = true;
+    } catch {}
+
     const failedWebhooks = await prisma.webhookEvent.count({ where: { status: 'FAILED' } });
 
     const msg = `📊 Daily Health Digest
@@ -40,6 +47,7 @@ Stuck:
 
 Infrastructure:
 ${adspowerOk ? '✅' : '❌'} AdsPower API
+${qbOk ? '✅ QB Token: OK' : '⚠️ QB Token: EXPIRED — manual reauth required'}
 ${failedWebhooks > 0 ? `⚠️ ${failedWebhooks} failed webhooks` : '✅ Webhooks OK'}
 
 ⏰ ${new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' })}`;

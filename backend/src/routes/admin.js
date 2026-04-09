@@ -313,4 +313,30 @@ router.get('/vendor-stats', async (req, res) => {
   }
 });
 
+// Update vendor account rate
+router.post('/accounts/:id/rate', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { rate } = req.body;
+
+    if (rate === undefined || rate === null || typeof rate !== 'number' || rate < 0 || rate > 1) {
+      return res.status(400).json({ error: 'rate must be a number between 0 and 1' });
+    }
+
+    const account = await prisma.vendorAccount.findUnique({ where: { id } });
+    if (!account) return res.status(404).json({ error: 'Vendor account not found' });
+
+    const updated = await prisma.vendorAccount.update({
+      where: { id },
+      data: { rate },
+    });
+
+    logger.info('Vendor account rate updated', { accountId: id, oldRate: account.rate, newRate: rate });
+    res.json(updated);
+  } catch (err) {
+    logger.error('Update account rate error', { error: err });
+    res.status(500).json({ error: 'Failed to update account rate' });
+  }
+});
+
 module.exports = router;

@@ -148,9 +148,39 @@ async function expireStaleInvoices() {
   }
 }
 
+async function waitForAdsPower() {
+  const ADSPOWER_API = process.env.ADSPOWER_API_URL || 'http://127.0.0.1:50325';
+  const ADSPOWER_TOKEN = process.env.ADSPOWER_API_KEY;
+  const MAX_RETRIES = 20;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const res = await fetch(`${ADSPOWER_API}/api/v1/user/list?page_size=1`, {
+        headers: { Authorization: `Bearer ${ADSPOWER_TOKEN}` },
+        signal: AbortSignal.timeout(5000),
+      });
+      const data = await res.json();
+      if (data.code === 0) {
+        logger.info('AdsPower is ready', { attempt });
+        return;
+      }
+      logger.warn('AdsPower responded but returned non-zero code', { attempt, code: data.code });
+    } catch (err) {
+      logger.warn('AdsPower not reachable, retrying in 30s', { attempt, maxRetries: MAX_RETRIES, error: err.message });
+    }
+
+    if (attempt < MAX_RETRIES) {
+      await new Promise((resolve) => setTimeout(resolve, 30000));
+    }
+  }
+
+  logger.warn('AdsPower did not become ready after max retries — starting anyway', { maxRetries: MAX_RETRIES });
+}
+
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   logger.info('Backend running', { port: PORT });
+  await waitForAdsPower();
   expireStaleInvoices(); // Check on startup
   setInterval(expireStaleInvoices, 60 * 60 * 1000); // Check every hour
   startWebhookProcessor();
