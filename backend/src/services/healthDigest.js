@@ -81,21 +81,37 @@ async function reconcileQBPayments(since) {
   }
 }
 
+// Track which invoices already got a stale alert so we don't spam
+const alertedStaleInvoices = new Set();
+
 async function checkStaleLoads() {
   try {
-    const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000);
+    // Only alert if stuck in LOADING for 15+ minutes since paidAt (not submittedAt)
+    const fifteenMinAgo = new Date(Date.now() - 15 * 60 * 1000);
     const stale = await prisma.invoice.findMany({
-      where: { status: 'LOADING', submittedAt: { lt: tenMinAgo } },
+      where: { status: 'LOADING', paidAt: { lt: fifteenMinAgo } },
       include: { vendor: true },
     });
 
     for (const inv of stale) {
-      const mins = Math.floor((Date.now() - new Date(inv.submittedAt).getTime()) / 60000);
+      // Skip if we already alerted for this invoice
+      if (alertedStaleInvoices.has(inv.id)) continue;
+      alertedStaleInvoices.add(inv.id);
+
+      const mins = Math.floor((Date.now() - new Date(inv.paidAt).getTime()) / 60000);
       await telegram.bot.sendMessage(
         process.env.TELEGRAM_ADMIN_CHAT_ID,
-        `⚠️ Stale Load Detected\n\nInvoice #${inv.id} (${inv.vendor.name}) has been LOADING for ${mins} minutes. Possible hung process.`
+        `⚠️ Stale Load Detected\n\nInvoice #${inv.id} (${inv.vendor.name}) has been LOADING for ${mins} minutes since payment. Possible hung process.`
       );
       log.warn('Stale load detected', { invoiceId: inv.id, minutes: mins });
+    }
+
+    // Clean up alerts for invoices no longer stuck
+    for (const id of alertedStaleInvoices) {
+      const inv = await prisma.invoice.findUnique({ where: { id } });
+      if (!inv || inv.status !== 'LOADING') {
+        alertedStaleInvoices.delete(id);
+      }
     }
   } catch (err) {
     log.error('Stale load check failed', { error: err });
@@ -118,7 +134,7 @@ function startHealthChecks() {
   };
 
   scheduleDigest();
-  setInterval(checkStaleLoads, 2 * 60 * 1000);
+  setInterval(checkStaleLoads, 5 * 60 * 1000);
 }
 
 module.exports = { sendDailyDigest, checkStaleLoads, startHealthChecks };
