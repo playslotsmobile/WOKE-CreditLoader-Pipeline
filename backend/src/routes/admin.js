@@ -317,7 +317,7 @@ router.get('/vendor-stats', async (req, res) => {
         lastActive: lastInvoice?.submittedAt || null,
       };
     })
-    .filter((v) => v.invoiceCount > 0 || v.creditLineCount > 0)
+    .filter((v) => v.invoiceCount > 0 || v.creditLineCount > 0 || v.creditLineOwed > 0)
     .sort((a, b) => (b.totalSpent + b.totalCreditLine) - (a.totalSpent + a.totalCreditLine));
 
     res.json(stats);
