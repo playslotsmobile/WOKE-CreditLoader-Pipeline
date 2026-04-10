@@ -5,3 +5,6 @@ dist/
 .DS_Store
 playwright-report/
 test-results/
+backend/sessions/
+backend/public/assets/
+backend/public/index.html
