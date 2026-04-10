@@ -157,6 +157,10 @@ async function createInvoice(vendor, invoice, allocations) {
   } else if (invoice.method === 'ACH (1%)') {
     invoiceData.AllowOnlineCreditCardPayment = false;
     invoiceData.AllowOnlineACHPayment = true;
+  } else if (invoice.method === 'PayPal (3%)') {
+    invoiceData.AllowOnlineCreditCardPayment = false;
+    invoiceData.AllowOnlineACHPayment = false;
+    invoiceData.AllowOnlinePayPalPayment = true;
   }
 
   const result = await qbRequest('POST', 'invoice', invoiceData);

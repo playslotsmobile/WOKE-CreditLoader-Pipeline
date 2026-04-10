@@ -118,6 +118,14 @@ const vendors = [
       { platform: 'PLAY777', username: 'Cindy123', operatorId: '1414', rate: 0.35, loadType: 'correction' },
     ],
   },
+  {
+    slug: 'tony', name: 'Tony Garcia', businessName: 'Tony Garcia',
+    email: 'maquinitasvalley123@gmail.com', qbCustomerId: 'Tony Garcia', telegramChatId: '-1002472851318',
+    accounts: [
+      { platform: 'PLAY777', username: 'Tony888', operatorId: '1957', rate: 0.40, loadType: 'vendor' },
+      { platform: 'ICONNECT', username: 'Tony8888', operatorId: null, rate: 0.30, loadType: 'vendor' },
+    ],
+  },
 ];
 
 async function seed() {

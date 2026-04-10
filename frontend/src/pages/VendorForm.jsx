@@ -5,12 +5,14 @@ import axios from 'axios';
 const FEE_RATES = {
   'Credit/Debit': 0.03,
   ACH: 0.01,
+  PayPal: 0.03,
   Wire: 0,
 };
 
 const METHOD_CONFIG = {
   'Credit/Debit': { min: 1000, max: 4500, step: 250 },
   ACH: { min: 1000, max: 9000, step: 250 },
+  PayPal: { min: 1000, max: 4500, step: 250 },
   Wire: { min: 1000, max: 20000 },
 };
 
@@ -403,16 +405,22 @@ export default function VendorForm() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-6">
                 <LockedField label="Email (Business)" value={vendor.email} />
                 <div>
-                  <Label required>Credit/Debit, ACH, or Wire?</Label>
+                  <Label required>Payment Method</Label>
                   <select
                     value={method}
                     onChange={(e) => setMethod(e.target.value)}
                     className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="">Choose</option>
-                    <option value="Credit/Debit">Credit/Debit (3%)</option>
-                    <option value="ACH">ACH (1%)</option>
-                    <option value="Wire">Wire</option>
+                    {vendorSlug === 'tony' ? (
+                      <option value="PayPal">PayPal (3%)</option>
+                    ) : (
+                      <>
+                        <option value="Credit/Debit">Credit/Debit (3%)</option>
+                        <option value="ACH">ACH (1%)</option>
+                        <option value="Wire">Wire</option>
+                      </>
+                    )}
                   </select>
                   <HelpText>Choose your payment method.</HelpText>
                 </div>
