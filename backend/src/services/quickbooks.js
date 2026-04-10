@@ -113,36 +113,16 @@ async function findCustomer(displayName) {
 async function createInvoice(vendor, invoice, allocations) {
   const customer = await findCustomer(vendor.qbCustomerName);
 
-  const lineItems = allocations
-    .filter((a) => a.dollarAmount > 0)
-    .map((a, i) => {
-      const platform = a.platform === 'PLAY777' ? '777' : 'IConnect';
-      const id = a.operatorId ? ` (${a.operatorId})` : '';
-      const label = `${platform} ${a.username}${id} - ${a.credits.toLocaleString()} credits`;
-      return {
-        LineNum: i + 1,
-        Amount: a.dollarAmount,
-        DetailType: 'SalesItemLineDetail',
-        Description: label,
-        SalesItemLineDetail: {
-          Qty: 1,
-          UnitPrice: a.dollarAmount,
-        },
-      };
-    });
-
-  if (invoice.feeAmount > 0) {
-    lineItems.push({
-      LineNum: lineItems.length + 1,
-      Amount: invoice.feeAmount,
-      DetailType: 'SalesItemLineDetail',
-      Description: `Processing fee (${invoice.method})`,
-      SalesItemLineDetail: {
-        Qty: 1,
-        UnitPrice: invoice.feeAmount,
-      },
-    });
-  }
+  const lineItems = [{
+    LineNum: 1,
+    Amount: invoice.totalAmount,
+    DetailType: 'SalesItemLineDetail',
+    Description: 'Software Lease',
+    SalesItemLineDetail: {
+      Qty: 1,
+      UnitPrice: invoice.totalAmount,
+    },
+  }];
 
   const invoiceData = {
     CustomerRef: { value: customer.Id },
@@ -158,7 +138,7 @@ async function createInvoice(vendor, invoice, allocations) {
     invoiceData.AllowOnlineCreditCardPayment = false;
     invoiceData.AllowOnlineACHPayment = true;
   } else if (invoice.method === 'PayPal (3%)') {
-    invoiceData.AllowOnlineCreditCardPayment = false;
+    invoiceData.AllowOnlineCreditCardPayment = true;
     invoiceData.AllowOnlineACHPayment = false;
     invoiceData.AllowOnlinePayPalPayment = true;
   }
