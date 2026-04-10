@@ -42,7 +42,7 @@ router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) =>
     if (!vendor) return res.status(404).json({ error: 'Vendor not found' });
 
     const isWire = method === 'Wire';
-    const methodLabel = isWire ? 'Wire' : method === 'ACH' ? 'ACH (1%)' : method === 'PayPal' ? 'PayPal (3%)' : 'Credit/Debit (3%)';
+    const methodLabel = isWire ? 'Wire' : method === 'ACH' ? 'ACH (1%)' : 'Credit/Debit (3%)';
 
     const validation = validateInvoice({
       vendor,
