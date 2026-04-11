@@ -1,8 +1,20 @@
 const prisma = require('../db/client');
 const telegram = require('./telegram');
+const masterBalance = require('./masterBalance');
 const { logger } = require('./logger');
 
 const log = logger.child({ service: 'healthDigest' });
+
+function fmtUsd(n) {
+  return '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function tierEmoji(tier) {
+  return tier === 'HEALTHY' ? '✅' :
+         tier === 'INFO' ? '📉' :
+         tier === 'WARN' ? '⚠️' :
+         tier === 'CRITICAL' ? '🚨' : '❓';
+}
 
 const ADSPOWER_API = process.env.ADSPOWER_API_URL || 'http://127.0.0.1:50325';
 const ADSPOWER_TOKEN = process.env.ADSPOWER_API_KEY;
@@ -34,16 +46,29 @@ async function sendDailyDigest() {
     } catch {}
 
     const failedWebhooks = await prisma.webhookEvent.count({ where: { status: 'FAILED' } });
+    const blockedLowMaster = await prisma.invoice.count({ where: { status: 'BLOCKED_LOW_MASTER' } });
+
+    const snapshot = await masterBalance.getSnapshot();
+    const p777Line = snapshot.play777
+      ? `${tierEmoji(snapshot.play777.tier)} Play777 (Master715): ${fmtUsd(snapshot.play777.balance)} — ${snapshot.play777.tier}`
+      : '❓ Play777: no reading yet';
+    const iconnectLine = snapshot.iconnect
+      ? `${tierEmoji(snapshot.iconnect.tier)} iConnect (tonydial): ${fmtUsd(snapshot.iconnect.balance)} — ${snapshot.iconnect.tier}`
+      : '❓ iConnect: no reading yet';
 
     const msg = `📊 Daily Health Digest
 
 Invoices (24h):
 ✅ Loaded: ${loaded}
 ❌ Failed: ${failed}
-
+${blockedLowMaster > 0 ? `⛔ Blocked (low master): ${blockedLowMaster}\n` : ''}
 Stuck:
 ⏳ LOADING: ${stuckLoading}
 📋 REQUESTED: ${stuckRequested}
+
+Master Balances:
+${p777Line}
+${iconnectLine}
 
 Infrastructure:
 ${adspowerOk ? '✅' : '❌'} AdsPower API
@@ -143,6 +168,22 @@ function startHealthChecks() {
 
   scheduleDigest();
   setInterval(checkStaleLoads, 5 * 60 * 1000);
+
+  // Master balance sweep every 2 hours. First run is delayed 5 minutes after
+  // startup so it doesn't collide with any in-flight boot-time load processing.
+  const runSweep = async () => {
+    try {
+      log.info('Running scheduled master balance sweep');
+      await masterBalance.runScheduledSweep();
+    } catch (err) {
+      log.error('Master balance sweep failed', { error: err.message });
+    }
+  };
+  setTimeout(() => {
+    runSweep();
+    setInterval(runSweep, 2 * 60 * 60 * 1000);
+  }, 5 * 60 * 1000);
+  log.info('Master balance sweep scheduled: first run in 5 min, then every 2h');
 }
 
 module.exports = { sendDailyDigest, checkStaleLoads, startHealthChecks };

@@ -5,6 +5,7 @@ const telegram = require('../services/telegram');
 const quickbooks = require('../services/quickbooks');
 const prisma = require('../db/client');
 const autoloader = require('../services/autoloader');
+const masterBalance = require('../services/masterBalance');
 const { requireAdmin, signToken } = require('../middleware/auth');
 const { logger } = require('../services/logger');
 
@@ -424,6 +425,56 @@ router.get('/credit-line-transactions', async (req, res) => {
     logger.error('Credit line transactions error', { error: err });
     res.status(500).json({ error: 'Failed to fetch credit line transactions' });
   }
+});
+
+// Master balance snapshot: latest reading per platform + 24h history for the
+// dashboard card's sparkline. Also reports blocked invoice count.
+router.get('/master-balances', async (req, res) => {
+  try {
+    const snapshot = await masterBalance.getSnapshot();
+    const [p777History, iconnectHistory, blockedCount] = await Promise.all([
+      masterBalance.getRecentHistory('PLAY777', 24),
+      masterBalance.getRecentHistory('ICONNECT', 24),
+      prisma.invoice.count({ where: { status: 'BLOCKED_LOW_MASTER' } }),
+    ]);
+
+    res.json({
+      thresholds: snapshot.thresholds,
+      play777: {
+        ...snapshot.play777,
+        history: p777History.map((h) => ({
+          balance: Number(h.balance),
+          tier: h.tier,
+          source: h.source,
+          checkedAt: h.checkedAt,
+        })),
+      },
+      iconnect: {
+        ...snapshot.iconnect,
+        history: iconnectHistory.map((h) => ({
+          balance: Number(h.balance),
+          tier: h.tier,
+          source: h.source,
+          checkedAt: h.checkedAt,
+        })),
+      },
+      blockedInvoiceCount: blockedCount,
+    });
+  } catch (err) {
+    logger.error('Master balance snapshot error', { error: err });
+    res.status(500).json({ error: 'Failed to fetch master balances' });
+  }
+});
+
+// Manually trigger a master balance sweep (useful after a refill so the admin
+// doesn't have to wait up to 2 hours for the scheduled sweep to catch up and
+// auto-resume blocked invoices). Returns immediately; sweep runs in background.
+router.post('/master-balances/sweep', async (req, res) => {
+  res.json({ success: true, message: 'Master balance sweep started in background' });
+
+  masterBalance.runScheduledSweep().catch((err) => {
+    logger.error('Manual master balance sweep failed', { error: err.message });
+  });
 });
 
 module.exports = router;

@@ -3,8 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import InvoicePipeline from '../components/InvoicePipeline';
 import EventTimeline from '../components/EventTimeline';
+import MasterBalances from '../components/MasterBalances';
 
-const STATUSES = ['REQUESTED', 'PENDING', 'PAID', 'LOADING', 'LOADED'];
+const STATUSES = ['REQUESTED', 'PENDING', 'PAID', 'BLOCKED_LOW_MASTER', 'LOADING', 'LOADED'];
 
 function getAuthHeaders() {
   const token = localStorage.getItem('admin_token');
@@ -20,6 +21,7 @@ export default function AdminDashboard() {
   const [creditLines, setCreditLines] = useState([]);
   const [clTransactions, setClTransactions] = useState([]);
   const [clVendorFilter, setClVendorFilter] = useState('');
+  const [masterBalances, setMasterBalances] = useState(null);
   const navigate = useNavigate();
 
   function handleAuthError(err) {
@@ -70,6 +72,15 @@ export default function AdminDashboard() {
     }
   }, [clVendorFilter]);
 
+  const fetchMasterBalances = useCallback(async () => {
+    try {
+      const res = await axios.get('/api/admin/master-balances', { headers: getAuthHeaders() });
+      setMasterBalances(res.data);
+    } catch (err) {
+      handleAuthError(err);
+    }
+  }, []);
+
   useEffect(() => {
     if (!localStorage.getItem('admin_token')) {
       navigate('/admin/login');
@@ -79,9 +90,14 @@ export default function AdminDashboard() {
     fetchVendorStats();
     fetchCreditLines();
     fetchClTransactions();
+    fetchMasterBalances();
     const interval = setInterval(fetchInvoices, 5000);
-    return () => clearInterval(interval);
-  }, [fetchInvoices, fetchVendorStats, fetchCreditLines, fetchClTransactions]);
+    const balanceInterval = setInterval(fetchMasterBalances, 60000);
+    return () => {
+      clearInterval(interval);
+      clearInterval(balanceInterval);
+    };
+  }, [fetchInvoices, fetchVendorStats, fetchCreditLines, fetchClTransactions, fetchMasterBalances]);
 
   useEffect(() => {
     fetchClTransactions();
@@ -204,7 +220,14 @@ export default function AdminDashboard() {
 
       <main className="p-3 sm:p-6">
         {view === 'dashboard' ? (
-          <VendorLeaderboard vendors={vendorStats} />
+          <>
+            <MasterBalances
+              data={masterBalances}
+              onRefresh={fetchMasterBalances}
+              getAuthHeaders={getAuthHeaders}
+            />
+            <VendorLeaderboard vendors={vendorStats} />
+          </>
         ) : view === 'pipeline' ? (
           <InvoicePipeline
             invoices={invoices}

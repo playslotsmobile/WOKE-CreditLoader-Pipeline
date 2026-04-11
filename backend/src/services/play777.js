@@ -4,6 +4,7 @@ const { captureFailure } = require('./screenshot');
 const telegram = require('./telegram');
 const prisma = require('../db/client');
 const { logger } = require('./logger');
+const masterBalance = require('./masterBalance');
 
 const DASHBOARD_URL = 'https://pna.play777games.com/dashboard';
 const VENDORS_URL = 'https://pna.play777games.com/vendors-overview';
@@ -325,6 +326,18 @@ async function verifyTransaction(page, expectedAccount, expectedType, expectedCr
       }
       return { found: false };
     }, { account: expectedAccount, type: expectedType, credits: expectedCredits });
+
+    // Opportunistic master balance capture — the first row of the my-balance
+    // table has the running balance after the most recent transaction, which is
+    // what Master715 holds right now. Free to read while we're already on the page.
+    try {
+      const currentBalance = await masterBalance.readPlay777FromMyBalance(page);
+      if (currentBalance != null) {
+        await masterBalance.recordBalance('PLAY777', currentBalance, 'opportunistic');
+      }
+    } catch (balanceErr) {
+      logger.warn('Opportunistic Play777 balance capture failed', { error: balanceErr.message });
+    }
 
     if (match.found) {
       logger.info('Transaction verified in My Balance', {

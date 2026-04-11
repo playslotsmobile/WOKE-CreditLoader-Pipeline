@@ -2,6 +2,7 @@ const prisma = require('../db/client');
 const quickbooks = require('./quickbooks');
 const autoloader = require('./autoloader');
 const telegram = require('./telegram');
+const masterBalance = require('./masterBalance');
 const { logger } = require('./logger');
 const creditLineService = require('./creditLineService');
 
@@ -92,7 +93,10 @@ async function handlePayment(paymentId, log) {
           { qbInvoiceId: String(qbInvoiceId) },
         ],
       },
-      include: { vendor: true },
+      include: {
+        vendor: true,
+        allocations: { include: { vendorAccount: true } },
+      },
     });
 
     if (!invoice) {
@@ -102,7 +106,10 @@ async function handlePayment(paymentId, log) {
         if (docNumber) {
           invoice = await prisma.invoice.findFirst({
             where: { qbInvoiceId: docNumber },
-            include: { vendor: true },
+            include: {
+              vendor: true,
+              allocations: { include: { vendorAccount: true } },
+            },
           });
         }
       } catch (err) {
@@ -124,6 +131,65 @@ async function handlePayment(paymentId, log) {
       data: { paymentId: String(paymentId), invoiceId: invoice.id },
     }).catch(() => {});
 
+    // Block-on-critical check. If any platform this invoice loads on has a
+    // master balance at CRITICAL tier, we flip to BLOCKED_LOW_MASTER instead
+    // of PAID and skip the autoloader. The vendor still gets the normal
+    // "Payment Received" message so their experience looks like normal
+    // processing latency — per feedback_vendor_silence_on_master_low, vendors
+    // must NEVER be told about master balance issues.
+    const targetPlatforms = Array.from(
+      new Set(
+        (invoice.allocations || [])
+          .filter((a) => Number(a.dollarAmount) > 0)
+          .map((a) => a.vendorAccount?.platform)
+          .filter(Boolean)
+      )
+    );
+    const criticalPlatforms = [];
+    for (const p of targetPlatforms) {
+      if (await masterBalance.isCritical(p)) criticalPlatforms.push(p);
+    }
+
+    if (criticalPlatforms.length > 0) {
+      log.warn('Blocking invoice — master at CRITICAL', {
+        invoiceId: invoice.id,
+        vendorName: invoice.vendor.name,
+        criticalPlatforms,
+      });
+
+      await prisma.invoice.update({
+        where: { id: invoice.id },
+        data: { status: 'BLOCKED_LOW_MASTER', paidAt: new Date() },
+      });
+
+      // Vendor silence: still send the normal innocuous "Payment Received"
+      // message so the vendor thinks processing is under way. Never mention
+      // the block reason.
+      try {
+        await telegram.sendVendorPaid(
+          { telegramChatId: invoice.vendor.telegramChatId },
+          { totalAmount: invoice.totalAmount, id: invoice.id }
+        );
+      } catch {}
+
+      // Admin-only alert with full context.
+      try {
+        const lines = criticalPlatforms
+          .map((p) => `• ${p === 'PLAY777' ? 'Play777 (Master715)' : 'iConnect (tonydial)'}`)
+          .join('\n');
+        await telegram.bot.sendMessage(
+          process.env.TELEGRAM_ADMIN_CHAT_ID,
+          `⛔ Invoice BLOCKED — master at CRITICAL\n\nInvoice #${invoice.id}\nVendor: ${invoice.vendor.name}\nAmount: $${Number(invoice.totalAmount).toLocaleString('en-US', { minimumFractionDigits: 2 })}\nPayment ID: ${paymentId}\n\nBlocked platform(s):\n${lines}\n\nRefill the master and the invoice will auto-resume on the next balance sweep (every 2h). Vendor was NOT told about this.`
+        );
+      } catch {}
+
+      // Still check for credit line repayment — repayment allocation is
+      // separate from the load, so it should still happen even if the load
+      // is blocked.
+      await maybeProcessCreditLineRepayment(invoice, log);
+      continue;
+    }
+
     log.info('Marking invoice PAID and triggering load', { invoiceId: invoice.id, vendorName: invoice.vendor.name });
 
     await prisma.invoice.update({
@@ -138,38 +204,7 @@ async function handlePayment(paymentId, log) {
       );
     } catch {}
 
-    // Check for credit line repayment
-    try {
-      const repaymentSetting = await prisma.setting.findUnique({
-        where: { key: `credit_line_repayment_${invoice.id}` },
-      });
-      if (repaymentSetting) {
-        const repaymentAmount = Number(repaymentSetting.value);
-        if (repaymentAmount > 0) {
-          await creditLineService.recordRepayment(invoice.vendorId, invoice.id, repaymentAmount);
-
-          // Get updated balance for notification
-          const cl = await creditLineService.getCreditLine(invoice.vendorId);
-
-          await telegram.sendCreditLineRepayment(
-            { name: invoice.vendor.name, telegramChatId: invoice.vendor.telegramChatId },
-            repaymentAmount,
-            { usedAmount: Number(cl.usedAmount), capAmount: Number(cl.capAmount) }
-          );
-
-          // Clean up the setting
-          await prisma.setting.delete({ where: { key: `credit_line_repayment_${invoice.id}` } });
-
-          log.info('Credit line repayment processed', {
-            invoiceId: invoice.id,
-            vendorId: invoice.vendorId,
-            repaymentAmount,
-          });
-        }
-      }
-    } catch (clErr) {
-      log.error('Credit line repayment processing failed', { error: clErr, invoiceId: invoice.id });
-    }
+    await maybeProcessCreditLineRepayment(invoice, log);
 
     autoloader.processInvoice(invoice.id).catch(async (err) => {
       log.error('Auto-loader failed', { invoiceId: invoice.id, error: err });
@@ -180,6 +215,36 @@ async function handlePayment(paymentId, log) {
         );
       } catch {}
     });
+  }
+}
+
+async function maybeProcessCreditLineRepayment(invoice, log) {
+  try {
+    const repaymentSetting = await prisma.setting.findUnique({
+      where: { key: `credit_line_repayment_${invoice.id}` },
+    });
+    if (!repaymentSetting) return;
+    const repaymentAmount = Number(repaymentSetting.value);
+    if (repaymentAmount <= 0) return;
+
+    await creditLineService.recordRepayment(invoice.vendorId, invoice.id, repaymentAmount);
+    const cl = await creditLineService.getCreditLine(invoice.vendorId);
+
+    await telegram.sendCreditLineRepayment(
+      { name: invoice.vendor.name, telegramChatId: invoice.vendor.telegramChatId },
+      repaymentAmount,
+      { usedAmount: Number(cl.usedAmount), capAmount: Number(cl.capAmount) }
+    );
+
+    await prisma.setting.delete({ where: { key: `credit_line_repayment_${invoice.id}` } });
+
+    log.info('Credit line repayment processed', {
+      invoiceId: invoice.id,
+      vendorId: invoice.vendorId,
+      repaymentAmount,
+    });
+  } catch (clErr) {
+    log.error('Credit line repayment processing failed', { error: clErr, invoiceId: invoice.id });
   }
 }
 

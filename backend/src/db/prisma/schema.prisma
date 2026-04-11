@@ -88,6 +88,7 @@ enum InvoiceStatus {
   LOADING
   LOADED
   FAILED
+  BLOCKED_LOW_MASTER
 }
 
 model Invoice {
@@ -230,4 +231,16 @@ model WebhookEvent {
 
   @@index([status])
   @@map("webhook_events")
+}
+
+model MasterBalance {
+  id        Int      @id @default(autoincrement())
+  platform  Platform
+  balance   Decimal  @db.Decimal(12, 2)
+  tier      String   // HEALTHY | INFO | WARN | CRITICAL
+  source    String   // opportunistic | scheduled | manual
+  checkedAt DateTime @default(now()) @map("checked_at")
+
+  @@index([platform, checkedAt(sort: Desc)])
+  @@map("master_balances")
 }

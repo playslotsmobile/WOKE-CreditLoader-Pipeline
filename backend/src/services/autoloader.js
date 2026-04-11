@@ -374,12 +374,11 @@ async function processInvoiceInternal(invoiceId, retryCount = 0) {
         logger.error('Telegram failure alert failed', { error: err.message });
       }
 
-      try {
-        await telegram.sendVendorFailed(
-          { telegramChatId: invoice.vendor.telegramChatId },
-          { id: invoice.id }
-        );
-      } catch {}
+      // Vendor silence: never tell the vendor a load failed. The failure
+      // fingerprint is indistinguishable from master-balance depletion and we
+      // must not give vendors any signal that we're having trouble loading.
+      // Admin handles retries manually via the dashboard.
+      // (previously called telegram.sendVendorFailed — intentionally removed)
     }
   }
 

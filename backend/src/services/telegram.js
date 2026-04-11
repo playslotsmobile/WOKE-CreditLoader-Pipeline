@@ -164,16 +164,16 @@ async function sendVendorPaid(vendor, invoice) {
   }
 }
 
+// DEPRECATED: do not call. Vendor silence rule — vendors must never be told
+// about loading failures. The fingerprint of a master-balance depletion and a
+// generic load failure are indistinguishable at the moment of failure, so we
+// never signal vendors either way. Kept as a no-op to avoid breaking any stale
+// call sites; any caller will be logged loudly so it can be removed.
 async function sendVendorFailed(vendor, invoice) {
-  if (!vendor.telegramChatId) return;
-  try {
-    await bot.sendMessage(
-      vendor.telegramChatId,
-      `⚠️ Loading Issue\n\nThere was an issue loading your credits for invoice #${invoice.id}. Our team has been notified and will resolve this shortly.`
-    );
-  } catch (err) {
-    logger.error('Telegram vendor failed notification failed', { error: err });
-  }
+  logger.warn('sendVendorFailed called — suppressed per vendor-silence rule', {
+    invoiceId: invoice?.id,
+    hasChatId: !!vendor?.telegramChatId,
+  });
 }
 
 // ── Credit Line Draw ──

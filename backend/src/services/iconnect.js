@@ -2,6 +2,7 @@ const { getBrowserContext, closeBrowser, humanDelay, humanType, humanMouseMove }
 const { restoreSession, saveSession } = require('./browserSession');
 const { captureFailure } = require('./screenshot');
 const { logger } = require('./logger');
+const masterBalance = require('./masterBalance');
 
 const SHOP_URL = 'https://river-pay.com/agent/show';
 const USERNAME = process.env.ICONNECT_USERNAME;
@@ -112,6 +113,18 @@ async function loadCredits(account, credits, jobId = 0) {
 
     if (page.url().includes('/agent/show')) {
       logger.info('IConnect: Successfully loaded credits', { credits, username: account.username });
+
+      // Opportunistic master balance capture — the /agent/show page has
+      // "Your balance: NNN usd" in the top banner. Read it while we're here.
+      try {
+        const currentBalance = await masterBalance.readIconnectFromAgentShow(page);
+        if (currentBalance != null) {
+          await masterBalance.recordBalance('ICONNECT', currentBalance, 'opportunistic');
+        }
+      } catch (balanceErr) {
+        logger.warn('Opportunistic iConnect balance capture failed', { error: balanceErr.message });
+      }
+
       await saveSession(context, 'iconnect');
       return { success: true, platform: 'ICONNECT', account: account.username, credits };
     } else {
