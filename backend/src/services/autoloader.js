@@ -4,6 +4,7 @@ const telegram = require('./telegram');
 const prisma = require('../db/client');
 const { logger } = require('./logger');
 const creditLineService = require('./creditLineService');
+const masterBalance = require('./masterBalance');
 
 const DRY_RUN = process.env.DRY_RUN === 'true';
 const MAX_RETRIES = 3;
@@ -350,34 +351,67 @@ async function processInvoiceInternal(invoiceId, retryCount = 0) {
         });
       }, delayMs);
     } else {
+      // Final disposition after retries exhausted: if the failure was caused
+      // by insufficient master credits, mark BLOCKED_LOW_MASTER so it stays
+      // visible in the pipeline (vs FAILED which is easy to miss). Auto-resume
+      // will pick it back up when the master is refilled.
+      //
+      // We check the CURRENT stored balance against the invoice's required
+      // credits — if we're still short, the cause was almost certainly master
+      // shortage and we flip to BLOCKED instead of FAILED. If we have enough
+      // credits now and the load still failed, that's a genuine failure
+      // (Cloudflare block, UI shift, AdsPower crash, etc) and stays FAILED.
+      let finalStatus = 'FAILED';
+      try {
+        const decision = await masterBalance.canLoadInvoice(invoice);
+        if (!decision.canLoad) {
+          finalStatus = 'BLOCKED_LOW_MASTER';
+          logger.warn('Reclassifying failed invoice as BLOCKED_LOW_MASTER', {
+            invoiceId,
+            checks: decision.checks,
+          });
+        }
+      } catch (balErr) {
+        logger.error('Failed to check master balance for reclassification', {
+          invoiceId,
+          error: balErr.message,
+        });
+      }
+
       await prisma.invoice.update({
         where: { id: invoiceId },
-        data: { status: 'FAILED' },
+        data: { status: finalStatus },
       });
 
       for (const job of pendingJobs) {
-        await emitEvent(job.id, 'INVOICE_FAILED', 'FAILED', { invoiceId, totalAttempts: MAX_RETRIES });
+        await emitEvent(job.id, 'INVOICE_FAILED', 'FAILED', {
+          invoiceId,
+          totalAttempts: MAX_RETRIES,
+          finalStatus,
+        });
       }
 
       logger.error('Loads failed after max retries', {
         invoiceId,
         failedCount: failed.length,
         maxRetries: MAX_RETRIES,
+        finalStatus,
       });
 
       try {
-        await telegram.bot.sendMessage(
-          process.env.TELEGRAM_ADMIN_CHAT_ID,
-          `🚨 LOAD FAILED (${MAX_RETRIES} attempts) 🚨\n\nInvoice #${invoiceId}\nVendor: ${invoice.vendor.name}\n\nUse the admin dashboard to retry manually.`
-        );
+        const msg =
+          finalStatus === 'BLOCKED_LOW_MASTER'
+            ? `⛔ LOAD BLOCKED (insufficient master credits) ⛔\n\nInvoice #${invoiceId}\nVendor: ${invoice.vendor.name}\n\nMaster balance was too low after ${MAX_RETRIES} retries. Kept in pipeline as BLOCKED_LOW_MASTER — will auto-resume on next balance sweep once master is refilled.`
+            : `🚨 LOAD FAILED (${MAX_RETRIES} attempts) 🚨\n\nInvoice #${invoiceId}\nVendor: ${invoice.vendor.name}\n\nUse the admin dashboard to retry manually.`;
+        await telegram.bot.sendMessage(process.env.TELEGRAM_ADMIN_CHAT_ID, msg);
       } catch (err) {
         logger.error('Telegram failure alert failed', { error: err.message });
       }
 
-      // Vendor silence: never tell the vendor a load failed. The failure
-      // fingerprint is indistinguishable from master-balance depletion and we
-      // must not give vendors any signal that we're having trouble loading.
-      // Admin handles retries manually via the dashboard.
+      // Vendor silence: never tell the vendor a load failed or was blocked.
+      // The failure fingerprint is indistinguishable from master-balance
+      // depletion and we must not give vendors any signal that we're having
+      // trouble loading. Admin handles retries manually via the dashboard.
       // (previously called telegram.sendVendorFailed — intentionally removed)
     }
   }

@@ -215,25 +215,90 @@ ${previousTier ? `Previous tier: ${previousTier}` : 'First recorded reading'}${s
 
 // ── Block-on-critical gating ─────────────────────────────────────────────
 
-// Returns true if the given platform's master is currently at CRITICAL tier,
-// meaning new loads should be blocked. Checks the most recent balance reading.
-// If no reading exists yet, returns false (fail-open, since blocking on missing
-// data would halt the pipeline the moment the feature ships before the first sweep runs).
+// Tier-based check — retained for tier transition alerts and the auto-resume
+// floor. NOT used by the webhook processor to gate individual invoices
+// anymore; use canLoadInvoice() for that.
 async function isCritical(platform) {
   const latest = await getLatestBalance(platform);
   if (!latest) return false;
   return latest.tier === 'CRITICAL';
 }
 
+// Credit-aware per-invoice blocking. Sums the credits needed from each
+// platform (not dollars — Play777 master balance is denominated in credits,
+// the "$" on the dashboard is cosmetic) and compares to the latest stored
+// balance for each involved platform. Returns a structured decision with
+// per-platform required vs available so the webhook processor can build an
+// informative admin alert.
+//
+// Safety buffer: 10% headroom over the literal required amount, to absorb
+// rate conversion inaccuracies and race conditions between the last balance
+// reading and the actual load.
+//
+// Behavior: fail-open if we have NO balance reading for a platform (don't
+// block the first invoice ever processed before the scheduled sweep has
+// populated the table). Fail-closed once we have any reading.
+async function canLoadInvoice(invoice) {
+  const SAFETY_BUFFER = 1.10;
+
+  const allocations = invoice.allocations || [];
+  const perPlatform = {};
+  for (const a of allocations) {
+    const platform = a.vendorAccount?.platform;
+    if (!platform) continue;
+    if (a.credits <= 0) continue;
+    perPlatform[platform] = (perPlatform[platform] || 0) + a.credits;
+  }
+
+  const checks = [];
+  let canLoad = true;
+
+  for (const [platform, requiredCredits] of Object.entries(perPlatform)) {
+    const latest = await getLatestBalance(platform);
+    const requiredWithBuffer = Math.ceil(requiredCredits * SAFETY_BUFFER);
+
+    if (!latest) {
+      checks.push({
+        platform,
+        required: requiredCredits,
+        requiredWithBuffer,
+        available: null,
+        sufficient: true,
+        reason: 'no_reading_yet',
+      });
+      continue;
+    }
+
+    const available = Number(latest.balance);
+    const sufficient = available >= requiredWithBuffer;
+    if (!sufficient) canLoad = false;
+
+    checks.push({
+      platform,
+      required: requiredCredits,
+      requiredWithBuffer,
+      available,
+      sufficient,
+      tier: latest.tier,
+      lastCheckedAt: latest.checkedAt,
+      reason: sufficient ? 'ok' : 'insufficient',
+    });
+  }
+
+  return { canLoad, checks };
+}
+
 // ── Auto-resume ──────────────────────────────────────────────────────────
 
-// Called by the scheduled sweep after a new reading is recorded. If the latest
-// reading shows the platform is above CRITICAL and there are BLOCKED_LOW_MASTER
-// invoices waiting, flip them back to PAID and requeue into the autoloader.
-// Admin-only notification, no vendor messages.
+// Called by the scheduled sweep after a new reading is recorded. If the
+// latest reading shows sufficient credits to cover a previously-blocked
+// invoice, flip it back to PAID and requeue into the autoloader. Uses the
+// same credit-aware check as the webhook blocker, so an invoice only
+// auto-resumes when we actually have enough credits for it — not just when
+// the tier crosses some arbitrary threshold.
 async function maybeAutoResume(platform) {
   const latest = await getLatestBalance(platform);
-  if (!latest || latest.tier === 'CRITICAL') return { resumed: 0 };
+  if (!latest) return { resumed: 0 };
 
   // Lazy-require to avoid a circular dep (autoloader → masterBalance → autoloader).
   const autoloader = require('./autoloader');
@@ -244,27 +309,23 @@ async function maybeAutoResume(platform) {
     orderBy: { submittedAt: 'asc' },
   });
 
-  // Only resume invoices whose platform matches the refilled master. If an
-  // invoice has allocations on multiple platforms, we need ALL of them to be
-  // non-critical before resuming.
   const toResume = [];
   for (const inv of blocked) {
+    // Check if this invoice involves the platform we just got a reading for.
     const platforms = new Set(
       inv.allocations
-        .filter((a) => Number(a.dollarAmount) > 0)
+        .filter((a) => a.credits > 0)
         .map((a) => a.vendorAccount?.platform)
         .filter(Boolean)
     );
-    // Must include this platform and every other platform must also be non-critical.
     if (!platforms.has(platform)) continue;
-    let allOk = true;
-    for (const p of platforms) {
-      if (await isCritical(p)) {
-        allOk = false;
-        break;
-      }
-    }
-    if (allOk) toResume.push(inv);
+
+    // Credit-aware check: only resume if current balance actually covers the
+    // invoice's credit requirement (with safety buffer). This is the same
+    // check the webhook uses to block, so an invoice resumes precisely when
+    // it would no longer be blocked.
+    const decision = await canLoadInvoice(inv);
+    if (decision.canLoad) toResume.push(inv);
   }
 
   if (toResume.length === 0) return { resumed: 0 };
@@ -427,6 +488,7 @@ module.exports = {
   recordBalance,
   getLatestBalance,
   isCritical,
+  canLoadInvoice,
   maybeAutoResume,
   runScheduledSweep,
   sweepPlay777,

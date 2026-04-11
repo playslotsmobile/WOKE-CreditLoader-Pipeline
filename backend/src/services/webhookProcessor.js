@@ -131,30 +131,22 @@ async function handlePayment(paymentId, log) {
       data: { paymentId: String(paymentId), invoiceId: invoice.id },
     }).catch(() => {});
 
-    // Block-on-critical check. If any platform this invoice loads on has a
-    // master balance at CRITICAL tier, we flip to BLOCKED_LOW_MASTER instead
-    // of PAID and skip the autoloader. The vendor still gets the normal
-    // "Payment Received" message so their experience looks like normal
-    // processing latency — per feedback_vendor_silence_on_master_low, vendors
-    // must NEVER be told about master balance issues.
-    const targetPlatforms = Array.from(
-      new Set(
-        (invoice.allocations || [])
-          .filter((a) => Number(a.dollarAmount) > 0)
-          .map((a) => a.vendorAccount?.platform)
-          .filter(Boolean)
-      )
-    );
-    const criticalPlatforms = [];
-    for (const p of targetPlatforms) {
-      if (await masterBalance.isCritical(p)) criticalPlatforms.push(p);
-    }
+    // Credit-aware block check. Compares this invoice's actual credit
+    // requirement per platform to the latest stored master balance. If any
+    // platform can't cover the invoice's credits (with a 10% safety buffer),
+    // we flip to BLOCKED_LOW_MASTER instead of PAID and skip the autoloader.
+    // The vendor still gets the normal "Payment Received" message so their
+    // experience looks like normal processing latency — per
+    // feedback_vendor_silence_on_master_low, vendors must NEVER be told about
+    // master balance issues.
+    const blockDecision = await masterBalance.canLoadInvoice(invoice);
 
-    if (criticalPlatforms.length > 0) {
-      log.warn('Blocking invoice — master at CRITICAL', {
+    if (!blockDecision.canLoad) {
+      const insufficient = blockDecision.checks.filter((c) => !c.sufficient);
+      log.warn('Blocking invoice — insufficient master credits', {
         invoiceId: invoice.id,
         vendorName: invoice.vendor.name,
-        criticalPlatforms,
+        checks: blockDecision.checks,
       });
 
       await prisma.invoice.update({
@@ -172,14 +164,20 @@ async function handlePayment(paymentId, log) {
         );
       } catch {}
 
-      // Admin-only alert with full context.
+      // Admin-only alert with full context including per-platform credit
+      // math so the admin knows exactly how short we are and how much to refill.
       try {
-        const lines = criticalPlatforms
-          .map((p) => `• ${p === 'PLAY777' ? 'Play777 (Master715)' : 'iConnect (tonydial)'}`)
-          .join('\n');
+        const lines = insufficient
+          .map((c) => {
+            const platformLabel =
+              c.platform === 'PLAY777' ? 'Play777 (Master715)' : 'iConnect (tonydial)';
+            const shortfall = c.requiredWithBuffer - c.available;
+            return `• ${platformLabel}\n  Needs: ${c.required.toLocaleString()} credits (${c.requiredWithBuffer.toLocaleString()} w/ buffer)\n  Has:   ${c.available.toLocaleString()} credits\n  Short: ${shortfall.toLocaleString()} credits`;
+          })
+          .join('\n\n');
         await telegram.bot.sendMessage(
           process.env.TELEGRAM_ADMIN_CHAT_ID,
-          `⛔ Invoice BLOCKED — master at CRITICAL\n\nInvoice #${invoice.id}\nVendor: ${invoice.vendor.name}\nAmount: $${Number(invoice.totalAmount).toLocaleString('en-US', { minimumFractionDigits: 2 })}\nPayment ID: ${paymentId}\n\nBlocked platform(s):\n${lines}\n\nRefill the master and the invoice will auto-resume on the next balance sweep (every 2h). Vendor was NOT told about this.`
+          `⛔ Invoice BLOCKED — insufficient master credits\n\nInvoice #${invoice.id}\nVendor: ${invoice.vendor.name}\nAmount: $${Number(invoice.totalAmount).toLocaleString('en-US', { minimumFractionDigits: 2 })}\nPayment ID: ${paymentId}\n\n${lines}\n\nRefill the master and the invoice will auto-resume on the next balance sweep (every 2h) — or hit "Force Sweep" in admin to trigger immediately. Vendor was NOT told about this.`
         );
       } catch {}
 
