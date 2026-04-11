@@ -54,22 +54,56 @@ async function readPlay777FromMyBalance(page) {
   }
 }
 
-// Play777: reads balance from the main dashboard "Current Balance" headline.
-// Used by the scheduled sweep when there's no active load session to piggyback on.
+// Play777: reads balance from the main dashboard "Current Balance" headline,
+// with a fallback to the my-balance transaction history page. The dashboard
+// loads the balance asynchronously and a short wait is not always enough, so
+// we poll the page body for up to 10s waiting for "Current Balance" to be
+// followed by an actual dollar figure. If that still fails, we fall back to
+// the my-balance page whose first row contains the same value in a stable
+// table cell. Used by the scheduled sweep when there's no active load
+// session to piggyback on.
 async function readPlay777FromDashboard(page) {
   try {
     await page.goto('https://pna.play777games.com/dashboard', {
       waitUntil: 'domcontentloaded',
       timeout: 60000,
     });
-    await page.waitForTimeout(3000);
 
-    const text = await page.evaluate(() => document.body.innerText || '');
-    const match = text.match(/Current Balance[^\d-]*([$\d,.\s-]+)/i);
-    if (!match) return null;
-    return parseCurrency(match[1]);
+    // Poll for up to 10s: the balance is rendered async after the label.
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline) {
+      const text = await page.evaluate(() => document.body.innerText || '');
+      const match = text.match(/Current Balance[^\d$-]*\$?([\d,]+\.?\d*)/i);
+      if (match) {
+        const n = parseCurrency(match[1]);
+        if (n != null && n > 0) return n;
+      }
+      await page.waitForTimeout(500);
+    }
+
+    logger.warn('readPlay777FromDashboard timed out waiting for balance — falling back to my-balance page');
   } catch (err) {
     logger.warn('readPlay777FromDashboard failed', { error: err.message });
+  }
+
+  // Fallback: navigate to the my-balance page and read the running balance
+  // from the first row's cells[6]. This is the same path the opportunistic
+  // capture uses and is known to be reliable.
+  try {
+    await page.goto('https://pna.play777games.com/history/my-balance', {
+      waitUntil: 'domcontentloaded',
+      timeout: 60000,
+    });
+    try {
+      await page.locator('table tbody tr').first().waitFor({ state: 'attached', timeout: 15000 });
+    } catch {
+      logger.warn('readPlay777 fallback: my-balance table did not load');
+      return null;
+    }
+    await page.waitForTimeout(1000);
+    return await readPlay777FromMyBalance(page);
+  } catch (fbErr) {
+    logger.warn('readPlay777 fallback failed', { error: fbErr.message });
     return null;
   }
 }
