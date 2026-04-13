@@ -142,6 +142,41 @@ router.post('/invoices/:id/trigger-load', async (req, res) => {
   }
 });
 
+// Delete invoice
+router.delete('/invoices/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const invoice = await prisma.invoice.findUnique({
+      where: { id },
+      include: { vendor: true },
+    });
+
+    if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+
+    // Don't allow deleting invoices that are currently loading
+    if (invoice.status === 'LOADING') {
+      return res.status(400).json({ error: 'Cannot delete — invoice is currently loading' });
+    }
+
+    // Delete related records first (FK constraints)
+    await prisma.loadEvent.deleteMany({
+      where: { loadJob: { invoiceId: id } },
+    });
+    await prisma.loadJob.deleteMany({ where: { invoiceId: id } });
+    await prisma.invoiceAllocation.deleteMany({ where: { invoiceId: id } });
+    await prisma.creditLineTransaction.deleteMany({ where: { invoiceId: id } });
+    await prisma.invoice.delete({ where: { id } });
+
+    // Clean up credit line repayment setting if exists
+    await prisma.setting.deleteMany({ where: { key: `credit_line_repayment_${id}` } });
+
+    res.json({ success: true, message: `Invoice ${id} deleted` });
+  } catch (err) {
+    console.error('Delete invoice error:', err);
+    res.status(500).json({ error: 'Failed to delete invoice' });
+  }
+});
+
 // Resend QB invoice email
 router.post('/invoices/:id/resend-email', async (req, res) => {
   try {
