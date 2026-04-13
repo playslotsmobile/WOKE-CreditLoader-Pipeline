@@ -1,4 +1,6 @@
 const TelegramBot = require('node-telegram-bot-api');
+const fs = require('fs');
+const path = require('path');
 const { logger } = require('./logger');
 
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: false });
@@ -33,7 +35,7 @@ function allocationBlocksCreditsOnly(allocations) {
 
 // ── Wire Submitted ──
 
-async function sendWireSubmitted(vendor, invoice, allocations) {
+async function sendWireSubmitted(vendor, invoice, allocations, receiptFilePath) {
   const mainMsg = `📩 Wire Submitted
 
 ${vendor.name}
@@ -44,11 +46,16 @@ Amount: ${fmt(invoice.baseAmount)}
 
 ${allocationBlocks(allocations)}
 
-📎 Wire receipt attached
-
 🔒 PENDING WIRE CONFIRMATION 🔒`;
 
-  await bot.sendMessage(ADMIN_CHAT_ID, mainMsg);
+  // Send receipt photo with caption if file exists, otherwise text-only
+  if (receiptFilePath && fs.existsSync(receiptFilePath)) {
+    await bot.sendPhoto(ADMIN_CHAT_ID, fs.createReadStream(receiptFilePath), {
+      caption: mainMsg,
+    });
+  } else {
+    await bot.sendMessage(ADMIN_CHAT_ID, mainMsg);
+  }
 
   if (vendor.telegramChatId) {
     const vendorMsg = `📩 Wire Submission Received

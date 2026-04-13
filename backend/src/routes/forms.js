@@ -153,7 +153,7 @@ router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) =>
 
     if (isWire) {
       try {
-        await telegram.sendWireSubmitted(vendorData, invoiceData, enrichedAllocations);
+        await telegram.sendWireSubmitted(vendorData, invoiceData, enrichedAllocations, req.file ? req.file.path : null);
       } catch (err) {
         logger.error('Telegram wire notification failed', { error: err });
       }
