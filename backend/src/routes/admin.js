@@ -158,6 +158,18 @@ router.delete('/invoices/:id', async (req, res) => {
       return res.status(400).json({ error: 'Cannot delete — invoice is currently loading' });
     }
 
+    // Void the QB invoice if one exists (card/ACH invoices)
+    let qbVoided = false;
+    if (invoice.qbInvoiceId) {
+      try {
+        await quickbooks.voidInvoice(invoice.qbInvoiceId);
+        qbVoided = true;
+        logger.info('QB invoice voided', { invoiceId: id, qbInvoiceId: invoice.qbInvoiceId });
+      } catch (err) {
+        logger.error('QB void failed — proceeding with delete', { invoiceId: id, error: err.message });
+      }
+    }
+
     // Delete related records first (FK constraints)
     await prisma.loadEvent.deleteMany({
       where: { loadJob: { invoiceId: id } },

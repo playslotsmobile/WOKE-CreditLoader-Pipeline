@@ -207,11 +207,39 @@ async function getPayment(paymentId) {
   return data.Payment;
 }
 
+async function findInvoiceByDocNumber(docNumber) {
+  const data = await qbRequest(
+    'GET',
+    `query?query=SELECT Id, DocNumber, SyncToken FROM Invoice WHERE DocNumber = '${docNumber}'`
+  );
+  const invoices = data.QueryResponse?.Invoice;
+  return invoices?.[0] || null;
+}
+
+async function voidInvoice(docNumber) {
+  // Look up the QB invoice by DocNumber to get Id and SyncToken
+  const qbInv = await findInvoiceByDocNumber(docNumber);
+  if (!qbInv) {
+    // Try as direct ID (legacy invoices stored internal ID)
+    const inv = await getInvoice(docNumber);
+    if (!inv) throw new Error(`QB invoice not found: ${docNumber}`);
+    return qbRequest('POST', 'invoice?operation=void', {
+      Id: inv.Id,
+      SyncToken: inv.SyncToken,
+    });
+  }
+  return qbRequest('POST', 'invoice?operation=void', {
+    Id: qbInv.Id,
+    SyncToken: qbInv.SyncToken,
+  });
+}
+
 module.exports = {
   findCustomer,
   createInvoice,
   sendInvoiceEmail,
   getInvoice,
   getPayment,
+  voidInvoice,
   qbRequest,
 };

@@ -151,6 +151,7 @@ export default function InvoiceCard({ invoice, allocations, onConfirmWire, onTri
             </div>
             <p className="text-xs text-red-400/70 mb-5">
               This will permanently remove this invoice and all related records.
+              {invoice.qbInvoiceId && ' The QuickBooks invoice will be voided.'}
             </p>
             <div className="flex gap-3">
               <button
