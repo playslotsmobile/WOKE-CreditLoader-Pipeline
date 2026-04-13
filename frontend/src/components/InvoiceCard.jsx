@@ -15,8 +15,9 @@ function timeAgo(dateStr) {
   return `${days}d`;
 }
 
-export default function InvoiceCard({ invoice, allocations, onConfirmWire, onTriggerLoad, onResendEmail, onShowEvents }) {
+export default function InvoiceCard({ invoice, allocations, onConfirmWire, onTriggerLoad, onResendEmail, onShowEvents, onDelete }) {
   const [showReceipt, setShowReceipt] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const isPending = invoice.status === 'PENDING';
   const isFailed = invoice.status === 'FAILED';
@@ -121,7 +122,53 @@ export default function InvoiceCard({ invoice, allocations, onConfirmWire, onTri
             Events
           </button>
         )}
+
+        {onDelete && (
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            className="mt-2 w-full text-xs py-1.5 rounded-lg text-red-500/50 hover:text-red-400 hover:bg-red-500/10 transition"
+          >
+            Delete
+          </button>
+        )}
       </div>
+
+      {/* Delete Confirmation */}
+      {showDeleteConfirm && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setShowDeleteConfirm(false)}
+        >
+          <div
+            className="bg-[#1c1f2e] rounded-xl border border-gray-700 p-6 max-w-sm w-full"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-gray-200 mb-2">Delete Invoice?</h3>
+            <div className="text-sm text-gray-400 mb-4 space-y-1">
+              <p><span className="text-gray-500">Vendor:</span> <span className="capitalize">{invoice.vendorSlug}</span></p>
+              <p><span className="text-gray-500">Invoice:</span> #{invoice.qbInvoiceId || invoice.id}</p>
+              <p><span className="text-gray-500">Amount:</span> {fmt(invoice.baseAmount)}</p>
+            </div>
+            <p className="text-xs text-red-400/70 mb-5">
+              This will permanently remove this invoice and all related records.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                className="flex-1 text-sm py-2 rounded-lg bg-gray-700/50 text-gray-400 hover:bg-gray-700 transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => { onDelete(invoice.id); setShowDeleteConfirm(false); }}
+                className="flex-1 text-sm py-2 rounded-lg bg-red-500/20 border border-red-500/30 text-red-400 hover:bg-red-500/30 transition font-semibold"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Receipt Lightbox */}
       {showReceipt && receiptUrl && (
