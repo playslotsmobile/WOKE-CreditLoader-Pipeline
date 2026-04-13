@@ -15,7 +15,7 @@ const THRESHOLDS = {
 // the scrapers themselves read whatever the logged-in session's own balance is.
 const MASTERS = {
   PLAY777: { label: 'Master715', operator: '1110' },
-  ICONNECT: { label: 'tonydial', operator: null },
+  ICONNECT: { label: 'tonydist', operator: null },
 };
 
 const ADMIN_CHAT_ID = process.env.TELEGRAM_ADMIN_CHAT_ID;

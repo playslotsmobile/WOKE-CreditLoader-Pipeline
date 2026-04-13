@@ -53,7 +53,7 @@ async function sendDailyDigest() {
       ? `${tierEmoji(snapshot.play777.tier)} Play777 (Master715): ${fmtUsd(snapshot.play777.balance)} — ${snapshot.play777.tier}`
       : '❓ Play777: no reading yet';
     const iconnectLine = snapshot.iconnect
-      ? `${tierEmoji(snapshot.iconnect.tier)} iConnect (tonydial): ${fmtUsd(snapshot.iconnect.balance)} — ${snapshot.iconnect.tier}`
+      ? `${tierEmoji(snapshot.iconnect.tier)} iConnect (tonydist): ${fmtUsd(snapshot.iconnect.balance)} — ${snapshot.iconnect.tier}`
       : '❓ iConnect: no reading yet';
 
     const msg = `📊 Daily Health Digest

@@ -144,7 +144,7 @@ export default function MasterBalances({ data, onRefresh, getAuthHeaders }) {
         <BalanceCard
           platform="ICONNECT"
           label="iConnect"
-          account="tonydial"
+          account="tonydist"
           data={data.iconnect}
           thresholds={data.thresholds}
         />

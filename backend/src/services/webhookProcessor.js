@@ -170,7 +170,7 @@ async function handlePayment(paymentId, log) {
         const lines = insufficient
           .map((c) => {
             const platformLabel =
-              c.platform === 'PLAY777' ? 'Play777 (Master715)' : 'iConnect (tonydial)';
+              c.platform === 'PLAY777' ? 'Play777 (Master715)' : 'iConnect (tonydist)';
             const shortfall = c.requiredWithBuffer - c.available;
             return `• ${platformLabel}\n  Needs: ${c.required.toLocaleString()} credits (${c.requiredWithBuffer.toLocaleString()} w/ buffer)\n  Has:   ${c.available.toLocaleString()} credits\n  Short: ${shortfall.toLocaleString()} credits`;
           })

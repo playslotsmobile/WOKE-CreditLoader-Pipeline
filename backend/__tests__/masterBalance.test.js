@@ -70,7 +70,7 @@ describe('masterBalance', () => {
     });
 
     test('has correct iConnect master identity', () => {
-      expect(masterBalance.MASTERS.ICONNECT.label).toBe('tonydial');
+      expect(masterBalance.MASTERS.ICONNECT.label).toBe('tonydist');
     });
   });
 });
