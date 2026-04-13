@@ -132,6 +132,9 @@ app.use('/api/admin', adminRoutes);
 // Serve failure screenshots for admin dashboard
 app.use('/api/screenshots', requireAdmin, express.static('/var/log/creditloader/failures'));
 
+// Serve wire receipt uploads for admin dashboard
+app.use('/api/uploads', requireAdmin, express.static(path.join(__dirname, '..', 'uploads')));
+
 // Serve frontend static files
 const publicPath = path.join(__dirname, '..', 'public');
 app.use(express.static(publicPath));
