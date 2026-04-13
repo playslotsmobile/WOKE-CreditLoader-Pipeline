@@ -64,6 +64,7 @@ router.get('/invoices', async (req, res) => {
         submittedAt: inv.submittedAt,
         paidAt: inv.paidAt,
         loadedAt: inv.loadedAt,
+        wireReceiptPath: inv.wireReceiptPath,
       },
       allocations: inv.allocations.map((a) => ({
         accountId: a.vendorAccountId,
