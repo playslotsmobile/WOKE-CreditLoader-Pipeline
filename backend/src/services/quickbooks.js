@@ -110,8 +110,24 @@ async function findCustomer(displayName) {
   return customers[0];
 }
 
+async function getNextDocNumber() {
+  // Find the highest numeric DocNumber across all invoices
+  const data = await qbRequest(
+    'GET',
+    "query?query=SELECT DocNumber FROM Invoice ORDER BY MetaData.CreateTime DESC MAXRESULTS 200"
+  );
+  const invoices = data.QueryResponse?.Invoice || [];
+  let max = 0;
+  for (const inv of invoices) {
+    const num = parseInt(inv.DocNumber, 10);
+    if (!isNaN(num) && num > max) max = num;
+  }
+  return String(max + 1);
+}
+
 async function createInvoice(vendor, invoice, allocations) {
   const customer = await findCustomer(vendor.qbCustomerName);
+  const docNumber = await getNextDocNumber();
 
   const lineItems = [{
     LineNum: 1,
@@ -125,6 +141,7 @@ async function createInvoice(vendor, invoice, allocations) {
   }];
 
   const invoiceData = {
+    DocNumber: docNumber,
     CustomerRef: { value: customer.Id },
     Line: lineItems,
     BillEmail: { Address: vendor.email },
