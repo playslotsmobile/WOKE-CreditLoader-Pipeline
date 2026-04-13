@@ -30,10 +30,11 @@ export default function InvoiceCard({ invoice, allocations, onConfirmWire, onTri
     <>
       <div className="bg-[#1c1f2e] rounded-lg border border-gray-800 hover:border-gray-700 transition p-3 group">
         {/* Header */}
-        <div className="flex justify-between items-start mb-2">
+        <div className="flex justify-between items-start mb-1">
           <p className="font-semibold text-sm text-gray-200 capitalize">{invoice.vendorSlug}</p>
           <span className="text-[10px] text-gray-600 font-mono">{timeAgo(invoice.submittedAt)}</span>
         </div>
+        <p className="text-[10px] text-gray-500 font-mono mb-2">#{invoice.qbInvoiceId || invoice.id}</p>
 
         {/* Method & Amount */}
         <div className="flex justify-between items-baseline mb-3">
