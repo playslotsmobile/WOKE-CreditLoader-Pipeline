@@ -99,10 +99,11 @@ model Invoice {
   baseAmount  Decimal       @map("base_amount") @db.Decimal(10, 2)
   feeAmount   Decimal       @map("fee_amount") @db.Decimal(10, 2)
   totalAmount Decimal       @map("total_amount") @db.Decimal(10, 2)
-  status      InvoiceStatus @default(REQUESTED)
-  submittedAt DateTime      @default(now()) @map("submitted_at")
-  paidAt      DateTime?     @map("paid_at")
-  loadedAt    DateTime?     @map("loaded_at")
+  status          InvoiceStatus @default(REQUESTED)
+  submittedAt     DateTime      @default(now()) @map("submitted_at")
+  paidAt          DateTime?     @map("paid_at")
+  loadedAt        DateTime?     @map("loaded_at")
+  wireReceiptPath String?       @map("wire_receipt_path")
 
   vendor                 Vendor              @relation(fields: [vendorId], references: [id])
   allocations            InvoiceAllocation[]
