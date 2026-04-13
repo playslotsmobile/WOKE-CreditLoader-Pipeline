@@ -77,6 +77,7 @@ router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) =>
         feeAmount,
         totalAmount,
         status: isWire ? 'PENDING' : 'REQUESTED',
+        wireReceiptPath: req.file ? req.file.filename : null,
       },
     });
 
@@ -137,9 +138,9 @@ router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) =>
       totalAmount,
     };
 
-    // Save wire receipt path if uploaded
+    // Backup wire receipt to secondary storage
     if (req.file) {
-      logger.info('Wire receipt saved', { filename: req.file.filename });
+      logger.info('Wire receipt saved to DB', { filename: req.file.filename, invoiceId: invoice.id });
       // Backup wire receipt
       const backupDir = '/var/backups/creditloader/receipts';
       try {
