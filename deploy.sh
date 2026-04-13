@@ -22,7 +22,6 @@ sshpass -p '7oSp1x/KE2saDgnDu1kfAQ==' ssh -o StrictHostKeyChecking=no root@87.99
   cd ../frontend
   npm install
   npm run build
-  cp -r dist/* ../backend/public/
 
   echo "🔄 Restarting service..."
   systemctl restart creditloader
