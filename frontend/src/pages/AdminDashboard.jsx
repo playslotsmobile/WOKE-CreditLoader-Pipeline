@@ -133,6 +133,16 @@ export default function AdminDashboard() {
     }
   }
 
+  async function handleDelete(invoiceId) {
+    try {
+      await axios.delete(`/api/admin/invoices/${invoiceId}`, { headers: getAuthHeaders() });
+      fetchInvoices();
+    } catch (err) {
+      handleAuthError(err);
+      alert(err.response?.data?.error || 'Failed to delete invoice');
+    }
+  }
+
   const counts = {};
   STATUSES.forEach((s) => {
     counts[s] = invoices.filter((i) => i.invoice.status === s).length;
@@ -236,6 +246,7 @@ export default function AdminDashboard() {
             onTriggerLoad={handleTriggerLoad}
             onResendEmail={handleResendEmail}
             onShowEvents={(id) => setSelectedInvoiceEvents(id)}
+            onDelete={handleDelete}
           />
         ) : view === 'creditLines' ? (
           <CreditLinesView

@@ -41,7 +41,7 @@ const HEADER_TEXT = {
   red: 'text-red-400',
 };
 
-export default function InvoicePipeline({ invoices, statuses, onConfirmWire, onTriggerLoad, onResendEmail, onShowEvents }) {
+export default function InvoicePipeline({ invoices, statuses, onConfirmWire, onTriggerLoad, onResendEmail, onShowEvents, onDelete }) {
   // Mobile: auto-expand columns that have items, collapse empty ones
   const [expanded, setExpanded] = useState(() => {
     const initial = {};
@@ -95,6 +95,7 @@ export default function InvoicePipeline({ invoices, statuses, onConfirmWire, onT
                         onTriggerLoad={onTriggerLoad}
                         onResendEmail={onResendEmail}
                         onShowEvents={onShowEvents}
+                        onDelete={onDelete}
                       />
                     ))
                   )}
@@ -148,6 +149,7 @@ export default function InvoicePipeline({ invoices, statuses, onConfirmWire, onT
                         onTriggerLoad={onTriggerLoad}
                         onResendEmail={onResendEmail}
                         onShowEvents={onShowEvents}
+                        onDelete={onDelete}
                       />
                     ))
                   )}
