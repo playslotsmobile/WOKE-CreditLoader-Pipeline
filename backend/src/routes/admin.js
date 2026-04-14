@@ -376,6 +376,87 @@ router.get('/vendor-stats', async (req, res) => {
   }
 });
 
+// Time-filtered stats (anchored on paidAt). Credit-line balances excluded
+// (those are point-in-time, not flow over a date range).
+router.get('/stats', async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    const where = { paidAt: { not: null } };
+    if (from || to) {
+      where.paidAt = {};
+      if (from) where.paidAt.gte = new Date(from);
+      if (to) where.paidAt.lte = new Date(to);
+    }
+
+    const invoices = await prisma.invoice.findMany({
+      where,
+      include: { allocations: true, vendor: { select: { id: true, name: true, slug: true } } },
+    });
+
+    const nonCorrection = invoices.filter((i) => i.method !== 'Correction');
+    const revenueInvoices = nonCorrection.filter((i) => i.method !== 'Credit Line');
+
+    const totalRevenue = revenueInvoices.reduce((s, i) => s + Number(i.baseAmount), 0);
+    const totalFees = revenueInvoices.reduce((s, i) => s + Number(i.feeAmount), 0);
+    const totalCredits = nonCorrection.reduce(
+      (s, i) => s + i.allocations.reduce((a, al) => a + al.credits, 0),
+      0
+    );
+    const invoiceCount = revenueInvoices.length;
+    const avgTicket = invoiceCount > 0 ? totalRevenue / invoiceCount : 0;
+    const activeVendors = new Set(revenueInvoices.map((i) => i.vendor.id)).size;
+
+    const byMethod = {};
+    for (const i of revenueInvoices) {
+      const k = i.method || 'unknown';
+      if (!byMethod[k]) byMethod[k] = { count: 0, revenue: 0 };
+      byMethod[k].count += 1;
+      byMethod[k].revenue += Number(i.baseAmount);
+    }
+
+    // Per-vendor breakdown for leaderboard (same range)
+    const vendorMap = {};
+    for (const i of revenueInvoices) {
+      const k = i.vendor.id;
+      if (!vendorMap[k]) {
+        vendorMap[k] = {
+          slug: i.vendor.slug,
+          name: i.vendor.name,
+          revenue: 0,
+          credits: 0,
+          count: 0,
+          lastActive: null,
+        };
+      }
+      vendorMap[k].revenue += Number(i.baseAmount);
+      vendorMap[k].credits += i.allocations.reduce((a, al) => a + al.credits, 0);
+      vendorMap[k].count += 1;
+      const paid = i.paidAt ? new Date(i.paidAt) : null;
+      if (paid && (!vendorMap[k].lastActive || paid > new Date(vendorMap[k].lastActive))) {
+        vendorMap[k].lastActive = i.paidAt;
+      }
+    }
+    const vendors = Object.values(vendorMap).sort((a, b) => b.revenue - a.revenue);
+
+    res.json({
+      range: { from: from || null, to: to || null },
+      totals: {
+        revenue: totalRevenue,
+        fees: totalFees,
+        credits: totalCredits,
+        invoiceCount,
+        avgTicket,
+        activeVendors,
+      },
+      byMethod,
+      vendors,
+    });
+  } catch (err) {
+    console.error('Stats error:', err);
+    res.status(500).json({ error: 'Failed to fetch stats' });
+  }
+});
+
 // Update vendor account rate
 router.post('/accounts/:id/rate', async (req, res) => {
   try {

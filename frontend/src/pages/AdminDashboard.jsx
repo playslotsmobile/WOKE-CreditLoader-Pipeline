@@ -7,6 +7,45 @@ import MasterBalances from '../components/MasterBalances';
 
 const STATUSES = ['REQUESTED', 'PENDING', 'PAID', 'BLOCKED_LOW_MASTER', 'LOADING', 'LOADED'];
 
+const DATE_PRESETS = [
+  { key: 'today', label: 'Today' },
+  { key: 'yesterday', label: 'Yesterday' },
+  { key: 'week', label: 'This Week' },
+  { key: 'month', label: 'This Month' },
+  { key: 'lastMonth', label: 'Last Month' },
+  { key: '30d', label: 'Last 30 Days' },
+  { key: 'all', label: 'All Time' },
+];
+
+function rangeFor(preset) {
+  const now = new Date();
+  const startOfDay = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+  const endOfDay = (d) => { const x = new Date(d); x.setHours(23, 59, 59, 999); return x; };
+
+  if (preset === 'today') return { from: startOfDay(now), to: endOfDay(now) };
+  if (preset === 'yesterday') {
+    const y = new Date(now); y.setDate(y.getDate() - 1);
+    return { from: startOfDay(y), to: endOfDay(y) };
+  }
+  if (preset === 'week') {
+    const w = new Date(now); w.setDate(w.getDate() - w.getDay());
+    return { from: startOfDay(w), to: endOfDay(now) };
+  }
+  if (preset === 'month') {
+    return { from: startOfDay(new Date(now.getFullYear(), now.getMonth(), 1)), to: endOfDay(now) };
+  }
+  if (preset === 'lastMonth') {
+    const first = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const last = new Date(now.getFullYear(), now.getMonth(), 0);
+    return { from: startOfDay(first), to: endOfDay(last) };
+  }
+  if (preset === '30d') {
+    const start = new Date(now); start.setDate(start.getDate() - 30);
+    return { from: startOfDay(start), to: endOfDay(now) };
+  }
+  return { from: null, to: null };
+}
+
 function getAuthHeaders() {
   const token = localStorage.getItem('admin_token');
   return token ? { Authorization: `Bearer ${token}` } : {};
@@ -22,6 +61,8 @@ export default function AdminDashboard() {
   const [clTransactions, setClTransactions] = useState([]);
   const [clVendorFilter, setClVendorFilter] = useState('');
   const [masterBalances, setMasterBalances] = useState(null);
+  const [datePreset, setDatePreset] = useState('month');
+  const [rangeStats, setRangeStats] = useState(null);
   const navigate = useNavigate();
 
   function handleAuthError(err) {
@@ -81,6 +122,20 @@ export default function AdminDashboard() {
     }
   }, []);
 
+  const fetchRangeStats = useCallback(async () => {
+    try {
+      const { from, to } = rangeFor(datePreset);
+      const params = new URLSearchParams();
+      if (from) params.set('from', from.toISOString());
+      if (to) params.set('to', to.toISOString());
+      const q = params.toString();
+      const res = await axios.get(`/api/admin/stats${q ? '?' + q : ''}`, { headers: getAuthHeaders() });
+      setRangeStats(res.data);
+    } catch (err) {
+      handleAuthError(err);
+    }
+  }, [datePreset]);
+
   useEffect(() => {
     if (!localStorage.getItem('admin_token')) {
       navigate('/admin/login');
@@ -91,13 +146,18 @@ export default function AdminDashboard() {
     fetchCreditLines();
     fetchClTransactions();
     fetchMasterBalances();
+    fetchRangeStats();
     const interval = setInterval(fetchInvoices, 5000);
     const balanceInterval = setInterval(fetchMasterBalances, 60000);
     return () => {
       clearInterval(interval);
       clearInterval(balanceInterval);
     };
-  }, [fetchInvoices, fetchVendorStats, fetchCreditLines, fetchClTransactions, fetchMasterBalances]);
+  }, [fetchInvoices, fetchVendorStats, fetchCreditLines, fetchClTransactions, fetchMasterBalances, fetchRangeStats]);
+
+  useEffect(() => {
+    fetchRangeStats();
+  }, [datePreset, fetchRangeStats]);
 
   useEffect(() => {
     fetchClTransactions();
@@ -223,6 +283,12 @@ export default function AdminDashboard() {
               >
                 Credit Lines
               </button>
+              <button
+                onClick={() => setView('submissions')}
+                className={`px-3 py-1 text-xs rounded-md transition ${view === 'submissions' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-300'}`}
+              >
+                Submissions
+              </button>
             </div>
           </div>
         </div>
@@ -236,6 +302,8 @@ export default function AdminDashboard() {
               onRefresh={fetchMasterBalances}
               getAuthHeaders={getAuthHeaders}
             />
+            <DateRangePicker preset={datePreset} onChange={setDatePreset} />
+            <RangeSummaryCards stats={rangeStats} preset={datePreset} />
             <VendorLeaderboard vendors={vendorStats} />
           </>
         ) : view === 'pipeline' ? (
@@ -255,6 +323,8 @@ export default function AdminDashboard() {
             vendorFilter={clVendorFilter}
             onVendorFilter={(slug) => setClVendorFilter(slug)}
           />
+        ) : view === 'submissions' ? (
+          <SubmissionsView invoices={invoices} onShowEvents={(id) => setSelectedInvoiceEvents(id)} />
         ) : null}
       </main>
 
@@ -287,29 +357,13 @@ function VendorLeaderboard({ vendors }) {
     );
   }
 
-  const totalSpentAll = vendors.reduce((s, v) => s + v.totalSpent, 0);
-  const totalCreditsAll = vendors.reduce((s, v) => s + v.totalCredits, 0);
-  const totalInvoicesAll = vendors.reduce((s, v) => s + v.invoiceCount, 0);
-  const totalOwedAll = vendors.reduce((s, v) => s + (v.creditLineOwed || 0), 0);
-
-  function fmtCompact(n) {
-    if (n >= 1000) return `$${(n / 1000).toFixed(1)}k`;
-    return `$${n.toLocaleString()}`;
-  }
-
   return (
     <div>
-      {/* Summary Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 sm:gap-4 mb-6">
-        <SummaryCard label="Total Revenue" value={fmtCompact(totalSpentAll)} sub="Paid invoices" color="text-green-400" />
-        <SummaryCard label="Total Owed" value={fmtCompact(totalOwedAll)} sub="Credit line balance" color={totalOwedAll > 0 ? 'text-orange-400' : 'text-gray-500'} />
-        <SummaryCard label="Total Credits" value={totalCreditsAll >= 1000000 ? (totalCreditsAll / 1000000).toFixed(2) + 'M' : totalCreditsAll.toLocaleString()} sub="Loaded lifetime" color="text-blue-400" />
-        <SummaryCard label="Total Invoices" value={totalInvoicesAll} sub="Paid only" color="text-purple-400" />
-        <SummaryCard label="Active Vendors" value={vendors.length} sub="With activity" color="text-amber-400" />
-      </div>
-
-      {/* Leaderboard */}
+      {/* Leaderboard (lifetime totals per vendor) */}
       <div className="bg-[#161922] rounded-xl border border-gray-800">
+        <div className="px-4 py-3 border-b border-gray-800">
+          <h3 className="text-sm font-semibold text-gray-300">Vendor Leaderboard <span className="text-xs text-gray-500 font-normal">(lifetime)</span></h3>
+        </div>
         {/* Mobile: card layout */}
         <div className="sm:hidden divide-y divide-gray-800/50">
           {vendors.map((v, i) => {
@@ -575,6 +629,174 @@ function CreditLinesView({ creditLines, transactions, vendorFilter, onVendorFilt
             </div>
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+function DateRangePicker({ preset, onChange }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 mb-4">
+      <span className="text-xs text-gray-500 mr-1">Range:</span>
+      {DATE_PRESETS.map((p) => (
+        <button
+          key={p.key}
+          onClick={() => onChange(p.key)}
+          className={`px-2.5 py-1 text-xs rounded-md transition border ${
+            preset === p.key
+              ? 'bg-blue-500/15 text-blue-300 border-blue-500/40'
+              : 'bg-gray-800/50 text-gray-400 border-gray-700 hover:text-gray-200 hover:border-gray-600'
+          }`}
+        >
+          {p.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function RangeSummaryCards({ stats, preset }) {
+  const label = DATE_PRESETS.find((p) => p.key === preset)?.label || 'Range';
+  const totals = stats?.totals || {
+    revenue: 0, fees: 0, credits: 0, invoiceCount: 0, avgTicket: 0, activeVendors: 0,
+  };
+
+  function fmtCompact(n) {
+    if (n >= 1000) return `$${(n / 1000).toFixed(1)}k`;
+    return `$${n.toLocaleString()}`;
+  }
+  function fmtCredits(n) {
+    if (n >= 1000000) return (n / 1000000).toFixed(2) + 'M';
+    if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+    return n.toLocaleString();
+  }
+
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 sm:gap-4 mb-6">
+      <SummaryCard label="Revenue" value={fmtCompact(totals.revenue)} sub={label} color="text-green-400" />
+      <SummaryCard label="Fees" value={fmtCompact(totals.fees)} sub={label} color="text-emerald-400" />
+      <SummaryCard label="Credits Loaded" value={fmtCredits(totals.credits)} sub={label} color="text-blue-400" />
+      <SummaryCard label="Invoices" value={totals.invoiceCount} sub={`Avg ${fmtCompact(Math.round(totals.avgTicket))}`} color="text-purple-400" />
+      <SummaryCard label="Active Vendors" value={totals.activeVendors} sub={label} color="text-amber-400" />
+    </div>
+  );
+}
+
+function SubmissionsView({ invoices, onShowEvents }) {
+  const [sortBy, setSortBy] = useState('submittedAt');
+  const [sortDir, setSortDir] = useState('desc');
+  const [search, setSearch] = useState('');
+
+  const rows = invoices
+    .filter((r) => {
+      if (!search) return true;
+      const q = search.toLowerCase();
+      return (
+        r.vendor?.name?.toLowerCase().includes(q) ||
+        r.invoice?.qbInvoiceId?.toLowerCase().includes(q) ||
+        String(r.invoice?.id).includes(q) ||
+        r.invoice?.method?.toLowerCase().includes(q) ||
+        r.invoice?.status?.toLowerCase().includes(q)
+      );
+    })
+    .slice()
+    .sort((a, b) => {
+      const ia = a.invoice, ib = b.invoice;
+      let va, vb;
+      if (sortBy === 'submittedAt') { va = ia.submittedAt; vb = ib.submittedAt; }
+      else if (sortBy === 'paidAt') { va = ia.paidAt; vb = ib.paidAt; }
+      else if (sortBy === 'totalAmount') { va = Number(ia.totalAmount); vb = Number(ib.totalAmount); }
+      else if (sortBy === 'vendor') { va = a.vendor?.name || ''; vb = b.vendor?.name || ''; }
+      else { va = ia[sortBy]; vb = ib[sortBy]; }
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      if (va < vb) return sortDir === 'asc' ? -1 : 1;
+      if (va > vb) return sortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+  function toggleSort(col) {
+    if (sortBy === col) setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
+    else { setSortBy(col); setSortDir('desc'); }
+  }
+
+  function fmtUsd(n) {
+    return '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function fmtDate(d) {
+    if (!d) return '-';
+    return new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  }
+
+  const H = ({ col, children }) => (
+    <th
+      onClick={() => toggleSort(col)}
+      className="px-3 py-2 cursor-pointer hover:text-gray-300 select-none"
+    >
+      {children} {sortBy === col ? (sortDir === 'asc' ? '\u2191' : '\u2193') : ''}
+    </th>
+  );
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search vendor, invoice #, method, status..."
+          className="flex-1 sm:max-w-md px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500"
+        />
+        <span className="text-xs text-gray-500">{rows.length} of {invoices.length}</span>
+      </div>
+
+      <div className="bg-[#161922] rounded-xl border border-gray-800 overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-800 text-left text-xs text-gray-500 uppercase tracking-wider">
+              <H col="submittedAt">Submitted</H>
+              <H col="vendor">Vendor</H>
+              <H col="qbInvoiceId">Invoice #</H>
+              <H col="method">Method</H>
+              <th className="px-3 py-2 text-right">Base</th>
+              <th className="px-3 py-2 text-right">Fee</th>
+              <H col="totalAmount">Total</H>
+              <H col="status">Status</H>
+              <H col="paidAt">Paid</H>
+              <th className="px-3 py-2">Loaded</th>
+              <th className="px-3 py-2"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr><td colSpan={11} className="px-4 py-8 text-center text-gray-500">No submissions.</td></tr>
+            ) : rows.map((r) => {
+              const i = r.invoice;
+              return (
+                <tr key={i.id} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition">
+                  <td className="px-3 py-2 text-xs text-gray-400 whitespace-nowrap">{fmtDate(i.submittedAt)}</td>
+                  <td className="px-3 py-2 text-gray-200 whitespace-nowrap">{r.vendor?.name || '-'}</td>
+                  <td className="px-3 py-2 font-mono text-xs text-gray-400">{i.qbInvoiceId || `#${i.id}`}</td>
+                  <td className="px-3 py-2 text-xs text-gray-400">{i.method}</td>
+                  <td className="px-3 py-2 text-right font-mono text-gray-400">{fmtUsd(i.baseAmount)}</td>
+                  <td className="px-3 py-2 text-right font-mono text-gray-500 text-xs">{fmtUsd(i.feeAmount)}</td>
+                  <td className="px-3 py-2 text-right font-mono text-gray-200">{fmtUsd(i.totalAmount)}</td>
+                  <td className="px-3 py-2"><StatusBadge status={i.status} /></td>
+                  <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">{fmtDate(i.paidAt)}</td>
+                  <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">{fmtDate(i.loadedAt)}</td>
+                  <td className="px-3 py-2">
+                    <button
+                      onClick={() => onShowEvents(i.id)}
+                      className="text-xs text-blue-400 hover:text-blue-300"
+                    >
+                      Events
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   );
