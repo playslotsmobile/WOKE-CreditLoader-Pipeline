@@ -52,6 +52,11 @@ router.get('/invoices', async (req, res) => {
     });
 
     const formatted = invoices.map((inv) => ({
+      vendor: {
+        slug: inv.vendor.slug,
+        name: inv.vendor.name,
+        businessName: inv.vendor.businessName,
+      },
       invoice: {
         id: inv.id,
         vendorSlug: inv.vendor.slug,
