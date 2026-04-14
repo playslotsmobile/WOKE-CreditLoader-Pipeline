@@ -158,13 +158,13 @@ ${allocationBlocksCreditsOnly(loadAllocations)}`;
   }
 }
 
-async function sendVendorPaid(vendor, invoice) {
+async function sendVendorPaid(vendor, invoice, { isRepaymentOnly = false } = {}) {
   if (!vendor.telegramChatId) return;
   try {
-    await bot.sendMessage(
-      vendor.telegramChatId,
-      `💰 Payment Received\n\nYour payment of ${fmt(invoice.totalAmount)} has been received. Credits are being loaded.`
-    );
+    const message = isRepaymentOnly
+      ? `💰 Payment Received\n\nYour payment of ${fmt(invoice.totalAmount)} has been received and applied to your credit line balance.`
+      : `💰 Payment Received\n\nYour payment of ${fmt(invoice.totalAmount)} has been received. Credits are being loaded.`;
+    await bot.sendMessage(vendor.telegramChatId, message);
   } catch (err) {
     logger.error('Telegram vendor paid notification failed', { error: err });
   }

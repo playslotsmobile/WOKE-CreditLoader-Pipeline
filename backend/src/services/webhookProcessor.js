@@ -160,7 +160,8 @@ async function handlePayment(paymentId, log) {
       try {
         await telegram.sendVendorPaid(
           { telegramChatId: invoice.vendor.telegramChatId },
-          { totalAmount: invoice.totalAmount, id: invoice.id }
+          { totalAmount: invoice.totalAmount, id: invoice.id },
+          { isRepaymentOnly: (invoice.allocations || []).length === 0 }
         );
       } catch {}
 
@@ -198,7 +199,8 @@ async function handlePayment(paymentId, log) {
     try {
       await telegram.sendVendorPaid(
         { telegramChatId: invoice.vendor.telegramChatId },
-        { totalAmount: invoice.totalAmount, id: invoice.id }
+        { totalAmount: invoice.totalAmount, id: invoice.id },
+        { isRepaymentOnly: (invoice.allocations || []).length === 0 }
       );
     } catch {}
 
