@@ -47,11 +47,14 @@ router.get('/invoices', async (req, res) => {
         allocations: {
           include: { vendorAccount: true },
         },
+        creditLineTransactions: { select: { type: true, amount: true } },
       },
       orderBy: { submittedAt: 'desc' },
     });
 
-    const formatted = invoices.map((inv) => ({
+    const formatted = invoices.map((inv) => {
+      const repaymentTxn = inv.creditLineTransactions.find((t) => t.type === 'REPAYMENT');
+      return {
       vendor: {
         slug: inv.vendor.slug,
         name: inv.vendor.name,
@@ -70,6 +73,7 @@ router.get('/invoices', async (req, res) => {
         paidAt: inv.paidAt,
         loadedAt: inv.loadedAt,
         wireReceiptPath: inv.wireReceiptPath,
+        creditLineRepayment: repaymentTxn ? Number(repaymentTxn.amount) : null,
       },
       allocations: inv.allocations.map((a) => ({
         accountId: a.vendorAccountId,
@@ -79,7 +83,8 @@ router.get('/invoices', async (req, res) => {
         username: a.vendorAccount.username,
         operatorId: a.vendorAccount.operatorId,
       })),
-    }));
+    };
+    });
 
     res.json(formatted);
   } catch (err) {

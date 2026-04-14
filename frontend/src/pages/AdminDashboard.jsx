@@ -728,10 +728,10 @@ function SubmissionsView({ invoices, onShowEvents }) {
     return new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
   }
 
-  const H = ({ col, children }) => (
+  const H = ({ col, align = 'left', children }) => (
     <th
       onClick={() => toggleSort(col)}
-      className="px-3 py-2 cursor-pointer hover:text-gray-300 select-none"
+      className={`px-3 py-2 cursor-pointer hover:text-gray-300 select-none ${align === 'right' ? 'text-right' : ''}`}
     >
       {children} {sortBy === col ? (sortDir === 'asc' ? '\u2191' : '\u2193') : ''}
     </th>
@@ -760,7 +760,7 @@ function SubmissionsView({ invoices, onShowEvents }) {
               <H col="method">Method</H>
               <th className="px-3 py-2 text-right">Base</th>
               <th className="px-3 py-2 text-right">Fee</th>
-              <H col="totalAmount">Total</H>
+              <H col="totalAmount" align="right">Total</H>
               <H col="status">Status</H>
               <H col="paidAt">Paid</H>
               <th className="px-3 py-2">Loaded</th>
@@ -777,7 +777,14 @@ function SubmissionsView({ invoices, onShowEvents }) {
                   <td className="px-3 py-2 text-xs text-gray-400 whitespace-nowrap">{fmtDate(i.submittedAt)}</td>
                   <td className="px-3 py-2 text-gray-200 whitespace-nowrap">{r.vendor?.name || '-'}</td>
                   <td className="px-3 py-2 font-mono text-xs text-gray-400">{i.qbInvoiceId || `#${i.id}`}</td>
-                  <td className="px-3 py-2 text-xs text-gray-400">{i.method}</td>
+                  <td className="px-3 py-2 text-xs text-gray-400">
+                    {i.method}
+                    {i.creditLineRepayment ? (
+                      <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-orange-500/15 text-orange-300 border border-orange-500/30">
+                        repayment
+                      </span>
+                    ) : null}
+                  </td>
                   <td className="px-3 py-2 text-right font-mono text-gray-400">{fmtUsd(i.baseAmount)}</td>
                   <td className="px-3 py-2 text-right font-mono text-gray-500 text-xs">{fmtUsd(i.feeAmount)}</td>
                   <td className="px-3 py-2 text-right font-mono text-gray-200">{fmtUsd(i.totalAmount)}</td>
