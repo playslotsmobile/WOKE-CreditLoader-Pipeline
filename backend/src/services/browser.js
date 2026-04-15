@@ -159,8 +159,10 @@ async function getBrowserContext(platform) {
   const debugPort = data.data.debug_port;
   logger.info('AdsPower profile launched', { platform, debugPort });
 
-  // Connect Playwright via CDP
-  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${debugPort}`);
+  // Connect Playwright via CDP. Bump timeout to 120s because AdsPower
+  // profiles with many stale tabs can take a while to enumerate all
+  // CDP targets on initial connection.
+  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${debugPort}`, { timeout: 120000 });
   const context = browser.contexts()[0];
 
   return { browser, context, profileId, platform };
