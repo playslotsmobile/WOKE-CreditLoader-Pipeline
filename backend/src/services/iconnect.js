@@ -48,7 +48,14 @@ async function loadCredits(account, credits, jobId = 0) {
 
     await restoreSession(context, 'iconnect');
 
-    const page = await context.newPage();
+    // Reuse existing page if present; close any stale extras so tabs don't
+    // accumulate across runs (happens when closeBrowser doesn't terminate
+    // the AdsPower profile cleanly on prior failures).
+    const existingPages = context.pages();
+    for (const p of existingPages.slice(1)) {
+      await p.close().catch(() => {});
+    }
+    const page = existingPages[0] || await context.newPage();
     await page.setViewportSize({ width: 1920, height: 1080 });
 
     const loggedIn = await ensureLoggedIn(page);

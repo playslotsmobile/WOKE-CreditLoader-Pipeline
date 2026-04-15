@@ -438,7 +438,11 @@ async function sweepIconnect() {
     session = await getBrowserContext('iconnect');
     await restoreSession(session.context, 'iconnect');
 
-    const page = await session.context.newPage();
+    const existingPages = session.context.pages();
+    for (const p of existingPages.slice(1)) {
+      await p.close().catch(() => {});
+    }
+    const page = existingPages[0] || await session.context.newPage();
     await page.setViewportSize({ width: 1920, height: 1080 });
 
     await iconnect.ensureLoggedIn(page);
