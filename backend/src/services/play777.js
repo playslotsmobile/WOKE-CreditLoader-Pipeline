@@ -198,11 +198,31 @@ async function fillDepositModal(page, credits, transactionType = 'deposit', jobI
   }
 }
 
+async function dismissStuckModal(page, jobId = 0) {
+  // A leftover .modal.show from a prior session silently intercepts every
+  // subsequent click on the vendors page. Press Escape until no open modal
+  // remains (up to 3 tries), then click the scrim as a last resort.
+  for (let i = 0; i < 3; i++) {
+    const open = await page.locator('.modal.fade.show, .modal.show').first().isVisible({ timeout: 300 }).catch(() => false);
+    if (!open) return;
+    logger.warn('Play777: stuck modal detected on vendors page — dismissing', { jobId, attempt: i + 1 });
+    await page.keyboard.press('Escape').catch(() => {});
+    await humanDelay(600, 1000);
+  }
+  const stillOpen = await page.locator('.modal.fade.show, .modal.show').first().isVisible({ timeout: 300 }).catch(() => false);
+  if (stillOpen) {
+    await page.locator('.modal-backdrop').first().click({ timeout: 2000, force: true }).catch(() => {});
+    await humanDelay(500, 800);
+  }
+}
+
 async function navigateToVendorsAndWait(page, jobId = 0) {
   for (let attempt = 0; attempt < 2; attempt++) {
     await page.goto(VENDORS_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.setViewportSize({ width: 1920, height: 1080 });
     await humanDelay(5000, 8000);
+
+    await dismissStuckModal(page, jobId);
 
     try {
       await page.locator('table tbody tr').first().waitFor({ state: 'attached', timeout: 60000 });
