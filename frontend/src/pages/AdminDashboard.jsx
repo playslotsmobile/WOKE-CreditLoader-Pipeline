@@ -703,6 +703,10 @@ function SubmissionsView({ invoices, onShowEvents, onTriggerLoad, onMarkLoaded }
   const [sortBy, setSortBy] = useState('submittedAt');
   const [sortDir, setSortDir] = useState('desc');
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+
+  useEffect(() => { setPage(1); }, [search, sortBy, sortDir, pageSize]);
 
   const rows = invoices
     .filter((r) => {
@@ -765,6 +769,13 @@ function SubmissionsView({ invoices, onShowEvents, onTriggerLoad, onMarkLoaded }
           className="flex-1 sm:max-w-md px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500"
         />
         <span className="text-xs text-gray-500">{rows.length} of {invoices.length}</span>
+        <select
+          value={pageSize}
+          onChange={(e) => setPageSize(Number(e.target.value))}
+          className="px-2 py-1 bg-gray-800 border border-gray-700 rounded text-xs text-gray-300"
+        >
+          {[25, 50, 100, 200].map((n) => <option key={n} value={n}>{n}/page</option>)}
+        </select>
       </div>
 
       <div className="bg-[#161922] rounded-xl border border-gray-800 overflow-x-auto">
@@ -788,7 +799,7 @@ function SubmissionsView({ invoices, onShowEvents, onTriggerLoad, onMarkLoaded }
           <tbody>
             {rows.length === 0 ? (
               <tr><td colSpan={12} className="px-4 py-8 text-center text-gray-500">No submissions.</td></tr>
-            ) : rows.map((r) => {
+            ) : rows.slice((page - 1) * pageSize, page * pageSize).map((r) => {
               const i = r.invoice;
               return (
                 <tr key={i.id} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition">
@@ -858,6 +869,27 @@ function SubmissionsView({ invoices, onShowEvents, onTriggerLoad, onMarkLoaded }
             })}
           </tbody>
         </table>
+      </div>
+      <Pagination page={page} pageSize={pageSize} total={rows.length} onPageChange={setPage} />
+    </div>
+  );
+}
+
+function Pagination({ page, pageSize, total, onPageChange }) {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  if (totalPages <= 1) return null;
+  const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const to = Math.min(page * pageSize, total);
+  const btn = 'px-2.5 py-1 text-xs rounded border border-gray-700 bg-gray-800 text-gray-300 hover:bg-gray-700 disabled:opacity-30 disabled:hover:bg-gray-800';
+  return (
+    <div className="flex items-center justify-between gap-2 mt-3">
+      <span className="text-xs text-gray-500">Showing {from}–{to} of {total}</span>
+      <div className="flex items-center gap-1.5">
+        <button className={btn} onClick={() => onPageChange(1)} disabled={page === 1}>«</button>
+        <button className={btn} onClick={() => onPageChange(page - 1)} disabled={page === 1}>Prev</button>
+        <span className="text-xs text-gray-400 px-2">Page {page} of {totalPages}</span>
+        <button className={btn} onClick={() => onPageChange(page + 1)} disabled={page >= totalPages}>Next</button>
+        <button className={btn} onClick={() => onPageChange(totalPages)} disabled={page >= totalPages}>»</button>
       </div>
     </div>
   );

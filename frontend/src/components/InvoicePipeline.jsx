@@ -41,6 +41,8 @@ const HEADER_TEXT = {
   red: 'text-red-400',
 };
 
+const COLUMN_PAGE_SIZE = 10;
+
 export default function InvoicePipeline({ invoices, statuses, onConfirmWire, onTriggerLoad, onMarkLoaded, onResendEmail, onShowEvents, onDelete }) {
   // Mobile: auto-expand columns that have items, collapse empty ones
   const [expanded, setExpanded] = useState(() => {
@@ -52,8 +54,32 @@ export default function InvoicePipeline({ invoices, statuses, onConfirmWire, onT
     return initial;
   });
 
+  const [pages, setPages] = useState({});
+
   function toggleExpand(status) {
     setExpanded((prev) => ({ ...prev, [status]: !prev[status] }));
+  }
+
+  function getPage(status) { return pages[status] || 1; }
+  function setColumnPage(status, p) { setPages((prev) => ({ ...prev, [status]: p })); }
+
+  function ColumnPager({ status, total }) {
+    const totalPages = Math.max(1, Math.ceil(total / COLUMN_PAGE_SIZE));
+    if (totalPages <= 1) return null;
+    const page = getPage(status);
+    const from = (page - 1) * COLUMN_PAGE_SIZE + 1;
+    const to = Math.min(page * COLUMN_PAGE_SIZE, total);
+    const btn = 'px-2 py-0.5 text-[10px] rounded border border-gray-700 bg-gray-800 text-gray-300 hover:bg-gray-700 disabled:opacity-30';
+    return (
+      <div className="mt-3 pt-2 border-t border-gray-800">
+        <div className="text-[10px] text-gray-500 text-center mb-1">{from}–{to} of {total}</div>
+        <div className="flex items-center justify-center gap-1">
+          <button className={btn} onClick={() => setColumnPage(status, Math.max(1, page - 1))} disabled={page === 1}>Prev</button>
+          <span className="text-[10px] text-gray-400 px-1">{page}/{totalPages}</span>
+          <button className={btn} onClick={() => setColumnPage(status, Math.min(totalPages, page + 1))} disabled={page >= totalPages}>Next</button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -63,6 +89,8 @@ export default function InvoicePipeline({ invoices, statuses, onConfirmWire, onT
         {statuses.map((status) => {
           const config = STATUS_CONFIG[status] || { label: status, color: 'gray', icon: '' };
           const items = invoices.filter((i) => i.invoice.status === status);
+          const page = getPage(status);
+          const pageItems = items.slice((page - 1) * COLUMN_PAGE_SIZE, page * COLUMN_PAGE_SIZE);
 
           return (
             <div key={status} className="flex-shrink-0 w-72">
@@ -86,7 +114,7 @@ export default function InvoicePipeline({ invoices, statuses, onConfirmWire, onT
                       <p className="text-xs text-gray-600">Empty</p>
                     </div>
                   ) : (
-                    items.map((item) => (
+                    pageItems.map((item) => (
                       <InvoiceCard
                         key={item.invoice.id}
                         invoice={item.invoice}
@@ -101,6 +129,7 @@ export default function InvoicePipeline({ invoices, statuses, onConfirmWire, onT
                     ))
                   )}
                 </div>
+                <ColumnPager status={status} total={items.length} />
               </div>
             </div>
           );
@@ -113,6 +142,8 @@ export default function InvoicePipeline({ invoices, statuses, onConfirmWire, onT
           const config = STATUS_CONFIG[status] || { label: status, color: 'gray', icon: '' };
           const items = invoices.filter((i) => i.invoice.status === status);
           const isOpen = expanded[status];
+          const page = getPage(status);
+          const pageItems = items.slice((page - 1) * COLUMN_PAGE_SIZE, page * COLUMN_PAGE_SIZE);
 
           return (
             <div key={status} className={`rounded-xl bg-[#161922] border ${COLUMN_STYLES[config.color]} overflow-hidden`}>
@@ -141,7 +172,7 @@ export default function InvoicePipeline({ invoices, statuses, onConfirmWire, onT
                   {items.length === 0 ? (
                     <p className="text-xs text-gray-600 text-center py-4">Empty</p>
                   ) : (
-                    items.map((item) => (
+                    pageItems.map((item) => (
                       <InvoiceCard
                         key={item.invoice.id}
                         invoice={item.invoice}
@@ -155,6 +186,7 @@ export default function InvoicePipeline({ invoices, statuses, onConfirmWire, onT
                       />
                     ))
                   )}
+                  <ColumnPager status={status} total={items.length} />
                 </div>
               )}
             </div>

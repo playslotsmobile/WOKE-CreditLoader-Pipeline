@@ -25,7 +25,7 @@ sshpass -p '7oSp1x/KE2saDgnDu1kfAQ==' ssh -o StrictHostKeyChecking=no root@87.99
 
   echo "🔄 Restarting service..."
   systemctl restart creditloader
-  sleep 3
+  sleep 10
 
   if curl -sf http://localhost:3000/api/vendors/mike > /dev/null; then
     echo "✅ DEPLOY OK — service is healthy"
