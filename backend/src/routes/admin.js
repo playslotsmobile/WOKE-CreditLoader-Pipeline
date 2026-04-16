@@ -152,6 +152,56 @@ router.post('/invoices/:id/trigger-load', async (req, res) => {
   }
 });
 
+// Mark invoice as manually loaded (operator deposited credits themselves on the
+// platform UI). Flips invoice → LOADED, any PENDING/FAILED loadJobs → SUCCESS,
+// and emits a MANUAL_LOAD event on each job for the audit trail. Does NOT
+// notify the vendor (operator handles that out-of-band).
+router.post('/invoices/:id/mark-loaded', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const invoice = await prisma.invoice.findUnique({ where: { id } });
+    if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+    const allowedFrom = ['FAILED', 'PAID', 'BLOCKED_LOW_MASTER'];
+    if (!allowedFrom.includes(invoice.status)) {
+      return res.status(400).json({ error: `Cannot mark loaded — invoice status is ${invoice.status}` });
+    }
+
+    const now = new Date();
+    const openJobs = await prisma.loadJob.findMany({
+      where: { invoiceId: id, status: { in: ['PENDING', 'FAILED'] } },
+    });
+
+    await prisma.$transaction([
+      ...openJobs.map((j) =>
+        prisma.loadJob.update({
+          where: { id: j.id },
+          data: { status: 'SUCCESS', errorMessage: null, completedAt: now },
+        })
+      ),
+      prisma.invoice.update({
+        where: { id },
+        data: { status: 'LOADED', loadedAt: now },
+      }),
+      ...openJobs.map((j) =>
+        prisma.loadEvent.create({
+          data: {
+            loadJobId: j.id,
+            step: 'MANUAL_LOAD',
+            status: 'SUCCESS',
+            metadata: { note: 'Marked loaded manually by admin', invoiceId: id, credits: j.creditsAmount },
+          },
+        })
+      ),
+    ]);
+
+    logger.info('Invoice marked as loaded manually', { invoiceId: id, jobsUpdated: openJobs.length });
+    res.json({ success: true, message: `Invoice ${id} marked as loaded`, jobsUpdated: openJobs.length });
+  } catch (err) {
+    console.error('Mark loaded error:', err);
+    res.status(500).json({ error: 'Failed to mark as loaded' });
+  }
+});
+
 // Delete invoice
 router.delete('/invoices/:id', async (req, res) => {
   try {

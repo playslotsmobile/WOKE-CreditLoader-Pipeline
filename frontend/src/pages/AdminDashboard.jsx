@@ -5,7 +5,7 @@ import InvoicePipeline from '../components/InvoicePipeline';
 import EventTimeline from '../components/EventTimeline';
 import MasterBalances from '../components/MasterBalances';
 
-const STATUSES = ['REQUESTED', 'PENDING', 'PAID', 'BLOCKED_LOW_MASTER', 'LOADING', 'LOADED'];
+const STATUSES = ['REQUESTED', 'PENDING', 'PAID', 'BLOCKED_LOW_MASTER', 'LOADING', 'FAILED', 'LOADED'];
 
 const DATE_PRESETS = [
   { key: 'today', label: 'Today' },
@@ -183,6 +183,17 @@ export default function AdminDashboard() {
     }
   }
 
+  async function handleMarkLoaded(invoiceId) {
+    if (!window.confirm('Mark this invoice as loaded manually?\n\nUse only if you already deposited the credits on the platform UI. The vendor will NOT be notified.')) return;
+    try {
+      await axios.post(`/api/admin/invoices/${invoiceId}/mark-loaded`, {}, { headers: getAuthHeaders() });
+      fetchInvoices();
+    } catch (err) {
+      handleAuthError(err);
+      alert(err.response?.data?.error || 'Failed to mark as loaded');
+    }
+  }
+
   async function handleResendEmail(invoiceId) {
     try {
       const res = await axios.post(`/api/admin/invoices/${invoiceId}/resend-email`, {}, { headers: getAuthHeaders() });
@@ -312,6 +323,7 @@ export default function AdminDashboard() {
             statuses={STATUSES}
             onConfirmWire={handleConfirmWire}
             onTriggerLoad={handleTriggerLoad}
+            onMarkLoaded={handleMarkLoaded}
             onResendEmail={handleResendEmail}
             onShowEvents={(id) => setSelectedInvoiceEvents(id)}
             onDelete={handleDelete}
@@ -324,7 +336,12 @@ export default function AdminDashboard() {
             onVendorFilter={(slug) => setClVendorFilter(slug)}
           />
         ) : view === 'submissions' ? (
-          <SubmissionsView invoices={invoices} onShowEvents={(id) => setSelectedInvoiceEvents(id)} />
+          <SubmissionsView
+            invoices={invoices}
+            onShowEvents={(id) => setSelectedInvoiceEvents(id)}
+            onTriggerLoad={handleTriggerLoad}
+            onMarkLoaded={handleMarkLoaded}
+          />
         ) : null}
       </main>
 
@@ -682,7 +699,7 @@ function RangeSummaryCards({ stats, preset }) {
   );
 }
 
-function SubmissionsView({ invoices, onShowEvents }) {
+function SubmissionsView({ invoices, onShowEvents, onTriggerLoad, onMarkLoaded }) {
   const [sortBy, setSortBy] = useState('submittedAt');
   const [sortDir, setSortDir] = useState('desc');
   const [search, setSearch] = useState('');
@@ -761,6 +778,7 @@ function SubmissionsView({ invoices, onShowEvents }) {
               <th className="px-3 py-2 text-right">Base</th>
               <th className="px-3 py-2 text-right">Fee</th>
               <H col="totalAmount" align="right">Total</H>
+              <th className="px-3 py-2">Accounts</th>
               <H col="status">Status</H>
               <H col="paidAt">Paid</H>
               <th className="px-3 py-2">Loaded</th>
@@ -769,7 +787,7 @@ function SubmissionsView({ invoices, onShowEvents }) {
           </thead>
           <tbody>
             {rows.length === 0 ? (
-              <tr><td colSpan={11} className="px-4 py-8 text-center text-gray-500">No submissions.</td></tr>
+              <tr><td colSpan={12} className="px-4 py-8 text-center text-gray-500">No submissions.</td></tr>
             ) : rows.map((r) => {
               const i = r.invoice;
               return (
@@ -788,16 +806,52 @@ function SubmissionsView({ invoices, onShowEvents }) {
                   <td className="px-3 py-2 text-right font-mono text-gray-400">{fmtUsd(i.baseAmount)}</td>
                   <td className="px-3 py-2 text-right font-mono text-gray-500 text-xs">{fmtUsd(i.feeAmount)}</td>
                   <td className="px-3 py-2 text-right font-mono text-gray-200">{fmtUsd(i.totalAmount)}</td>
+                  <td className="px-3 py-2 text-xs whitespace-nowrap">
+                    {(r.allocations || []).filter((a) => a.credits > 0).length === 0 ? (
+                      <span className="text-gray-600">-</span>
+                    ) : (
+                      <div className="space-y-0.5">
+                        {r.allocations.filter((a) => a.credits > 0).map((a, idx) => (
+                          <div key={idx} className="flex items-center gap-1.5">
+                            <span className={`w-1 h-1 rounded-full ${a.platform === 'PLAY777' ? 'bg-blue-400' : 'bg-emerald-400'}`}></span>
+                            <span className="text-gray-500 w-6">{a.platform === 'PLAY777' ? '777' : 'IC'}</span>
+                            <span className="text-gray-400">{a.username}</span>
+                            <span className="font-mono text-gray-300 ml-1">{a.credits.toLocaleString()}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-3 py-2"><StatusBadge status={i.status} /></td>
                   <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">{fmtDate(i.paidAt)}</td>
                   <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">{fmtDate(i.loadedAt)}</td>
-                  <td className="px-3 py-2">
-                    <button
-                      onClick={() => onShowEvents(i.id)}
-                      className="text-xs text-blue-400 hover:text-blue-300"
-                    >
-                      Events
-                    </button>
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    <div className="flex gap-2 items-center">
+                      {(i.status === 'FAILED' || i.status === 'BLOCKED_LOW_MASTER') && onTriggerLoad && (
+                        <button
+                          onClick={() => onTriggerLoad(i.id)}
+                          className="text-xs font-semibold text-red-400 hover:text-red-300"
+                          title="Re-run the autoloader for this invoice"
+                        >
+                          Retry
+                        </button>
+                      )}
+                      {(i.status === 'FAILED' || i.status === 'PAID' || i.status === 'BLOCKED_LOW_MASTER') && onMarkLoaded && (
+                        <button
+                          onClick={() => onMarkLoaded(i.id)}
+                          className="text-xs font-semibold text-green-400 hover:text-green-300"
+                          title="Mark as loaded (only if you deposited credits manually on the platform)"
+                        >
+                          Mark Loaded
+                        </button>
+                      )}
+                      <button
+                        onClick={() => onShowEvents(i.id)}
+                        className="text-xs text-blue-400 hover:text-blue-300"
+                      >
+                        Events
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );

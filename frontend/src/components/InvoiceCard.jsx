@@ -15,7 +15,7 @@ function timeAgo(dateStr) {
   return `${days}d`;
 }
 
-export default function InvoiceCard({ invoice, allocations, onConfirmWire, onTriggerLoad, onResendEmail, onShowEvents, onDelete }) {
+export default function InvoiceCard({ invoice, allocations, onConfirmWire, onTriggerLoad, onMarkLoaded, onResendEmail, onShowEvents, onDelete }) {
   const [showReceipt, setShowReceipt] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -88,12 +88,23 @@ export default function InvoiceCard({ invoice, allocations, onConfirmWire, onTri
         )}
 
         {isFailed && (
-          <button
-            onClick={() => onTriggerLoad(invoice.id)}
-            className="mt-3 w-full text-xs font-semibold py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 transition"
-          >
-            Retry Load
-          </button>
+          <>
+            <button
+              onClick={() => onTriggerLoad(invoice.id)}
+              className="mt-3 w-full text-xs font-semibold py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 transition"
+            >
+              Retry Load
+            </button>
+            {onMarkLoaded && (
+              <button
+                onClick={() => onMarkLoaded(invoice.id)}
+                className="mt-2 w-full text-xs font-semibold py-2 rounded-lg bg-green-500/10 border border-green-500/30 text-green-400 hover:bg-green-500/20 transition"
+                title="Mark as loaded — only if you deposited credits manually on the platform"
+              >
+                Mark Loaded Manually
+              </button>
+            )}
+          </>
         )}
 
         {isPaid && (
