@@ -79,6 +79,7 @@ const vendors = [
     email: 'Arturo.castro202@gmail.com', qbCustomerId: 'AC DRIP LLC', telegramChatId: '-1002269930759',
     accounts: [
       { platform: 'PLAY777', username: 'Lyn1234', operatorId: '1117', rate: 0.40 },
+      { platform: 'ICONNECT', username: 'Lynette1', rate: 0.20 },
     ],
   },
   {
