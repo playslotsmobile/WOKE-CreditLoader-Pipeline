@@ -6,13 +6,17 @@ const FEE_RATES = {
   'Credit/Debit': 0.03,
   ACH: 0.01,
   Wire: 0,
+  Cash: 0,
 };
 
 const METHOD_CONFIG = {
   'Credit/Debit': { min: 1000, max: 4500, step: 250 },
   ACH: { min: 1000, max: 9000, step: 250 },
   Wire: { min: 1000, max: 20000 },
+  Cash: { min: 1000, max: 20000, step: 250 },
 };
+
+const CASH_ALLOWED_SLUGS = ['alex', 'claudia'];
 
 function buildOptions(min, max, step) {
   const opts = [];
@@ -134,9 +138,13 @@ export default function VendorForm() {
   // Invoice calculations
   const config = METHOD_CONFIG[method];
   const isWire = method === 'Wire';
+  const isCash = method === 'Cash';
+  const isOffline = isWire || isCash;
+  const cashAllowed = CASH_ALLOWED_SLUGS.includes(vendorSlug);
 
   const dropdownOptions = useMemo(() => {
-    if (!config || isWire) return [];
+    if (!config) return [];
+    if (isWire) return [];
     return buildOptions(config.min, config.max, config.step);
   }, [method]);
 
@@ -413,8 +421,14 @@ export default function VendorForm() {
                     <option value="Credit/Debit">Credit/Debit (3%)</option>
                     <option value="ACH">ACH (1%)</option>
                     <option value="Wire">Wire</option>
+                    {cashAllowed && <option value="Cash">Cash</option>}
                   </select>
                   <HelpText>Choose your payment method.</HelpText>
+                  {isCash && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      No invoice will be sent. Pay cash in person — admin will mark paid to trigger the load.
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -482,7 +496,7 @@ export default function VendorForm() {
                 )}
 
                 {/* Total w/ Fee */}
-                {method && !isWire && base > 0 && (
+                {method && !isOffline && base > 0 && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-6">
                     <div>
                       <p className="text-sm font-semibold text-gray-900">
