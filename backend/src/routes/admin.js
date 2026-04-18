@@ -128,6 +128,38 @@ router.post('/invoices/:id/confirm-wire', async (req, res) => {
   }
 });
 
+// Admin confirms cash was received — flips PENDING Cash → PAID and triggers autoload.
+router.post('/invoices/:id/confirm-cash', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const invoice = await prisma.invoice.findUnique({
+      where: { id },
+      include: {
+        vendor: true,
+        allocations: { include: { vendorAccount: true } },
+      },
+    });
+
+    if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+    if (invoice.method !== 'Cash') return res.status(400).json({ error: 'Not a cash invoice' });
+    if (invoice.status !== 'PENDING') return res.status(400).json({ error: 'Invoice not in PENDING status' });
+
+    await prisma.invoice.update({
+      where: { id },
+      data: { status: 'PAID', paidAt: new Date() },
+    });
+
+    res.json({ success: true, message: 'Cash confirmed, loading credits...' });
+
+    autoloader.processInvoice(id).catch((err) => {
+      console.error('Auto-loader failed for cash invoice:', err.message);
+    });
+  } catch (err) {
+    console.error('Confirm cash error:', err);
+    res.status(500).json({ error: 'Failed to confirm cash' });
+  }
+});
+
 // Manual load trigger
 router.post('/invoices/:id/trigger-load', async (req, res) => {
   try {
