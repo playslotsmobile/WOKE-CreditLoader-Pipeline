@@ -65,6 +65,32 @@ Your wire form for ${fmt(invoice.baseAmount)} has been submitted. Credits will b
   }
 }
 
+// ── Cash Submitted ──
+
+async function sendCashSubmitted(vendor, invoice, allocations) {
+  const mainMsg = `💵 Cash Submitted
+
+${vendor.name}
+
+Invoice ID: ${invoice.id}
+Method: Cash
+Amount: ${fmt(invoice.baseAmount)}
+
+${allocationBlocks(allocations)}
+
+🔒 PENDING CASH CONFIRMATION 🔒`;
+
+  await bot.sendMessage(ADMIN_CHAT_ID, mainMsg);
+
+  if (vendor.telegramChatId) {
+    const vendorMsg = `💵 Cash Request Received
+
+Your cash form for ${fmt(invoice.baseAmount)} has been submitted. Credits will be loaded once the cash is received and confirmed.`;
+
+    await bot.sendMessage(vendor.telegramChatId, vendorMsg);
+  }
+}
+
 // ── Invoice Sent (Card/ACH) ──
 
 async function sendInvoiceSent(vendor, invoice, allocations) {
@@ -232,6 +258,7 @@ Balance: ${fmt(creditLineBalance.usedAmount)} / ${fmt(creditLineBalance.capAmoun
 module.exports = {
   bot,
   sendWireSubmitted,
+  sendCashSubmitted,
   sendInvoiceSent,
   sendLoaded,
   sendVendorPaid,
