@@ -7,6 +7,7 @@ const quickbooks = require('../services/quickbooks');
 const telegram = require('../services/telegram');
 const autoloader = require('../services/autoloader');
 const { validateInvoice, validateCorrection } = require('../services/validator');
+const { CASH_ALLOWED_SLUGS } = require('../constants/cash');
 const prisma = require('../db/client');
 const creditLineService = require('../services/creditLineService');
 const { logger } = require('../services/logger');
@@ -41,8 +42,18 @@ router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) =>
     });
     if (!vendor) return res.status(404).json({ error: 'Vendor not found' });
 
+    if (method === 'Cash' && !CASH_ALLOWED_SLUGS.includes(vendor.slug)) {
+      return res.status(403).json({ error: 'Cash not enabled for this vendor' });
+    }
+
     const isWire = method === 'Wire';
-    const methodLabel = isWire ? 'Wire' : method === 'ACH' ? 'ACH (1%)' : 'Credit/Debit (3%)';
+    const isCash = method === 'Cash';
+    const isOffline = isWire || isCash;
+    let methodLabel;
+    if (isWire) methodLabel = 'Wire';
+    else if (isCash) methodLabel = 'Cash';
+    else if (method === 'ACH') methodLabel = 'ACH (1%)';
+    else methodLabel = 'Credit/Debit (3%)';
 
     const validation = validateInvoice({
       vendor,
@@ -76,7 +87,7 @@ router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) =>
         baseAmount,
         feeAmount,
         totalAmount,
-        status: isWire ? 'PENDING' : 'REQUESTED',
+        status: isOffline ? 'PENDING' : 'REQUESTED',
         wireReceiptPath: req.file ? req.file.filename : null,
       },
     });
@@ -151,7 +162,13 @@ router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) =>
       }
     }
 
-    if (isWire) {
+    if (isCash) {
+      try {
+        await telegram.sendCashSubmitted(vendorData, invoiceData, enrichedAllocations);
+      } catch (err) {
+        logger.error('Telegram cash notification failed', { error: err });
+      }
+    } else if (isWire) {
       try {
         await telegram.sendWireSubmitted(vendorData, invoiceData, enrichedAllocations, req.file ? req.file.path : null);
       } catch (err) {
