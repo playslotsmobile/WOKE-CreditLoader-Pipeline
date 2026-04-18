@@ -1,6 +1,10 @@
 function validateInvoice({ vendor, method, baseAmount, feeAmount, totalAmount, allocations, creditLineRepayment = 0 }) {
   if (baseAmount <= 0) return { valid: false, error: 'Base amount must be positive' };
 
+  if (method === 'Cash' && Number(feeAmount) !== 0) {
+    return { valid: false, error: 'Cash invoices must have no fee' };
+  }
+
   if (method !== 'Wire' && method !== 'Credit Line' && baseAmount < 1000) {
     return { valid: false, error: `$1,000 minimum required for ${method}` };
   }

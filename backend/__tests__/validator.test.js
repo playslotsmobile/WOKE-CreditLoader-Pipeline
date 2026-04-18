@@ -117,6 +117,61 @@ describe('validateInvoice', () => {
     });
     expect(result.valid).toBe(true);
   });
+
+  describe('Cash method', () => {
+    const cashVendor = makeVendor();
+
+    test('valid Cash invoice with single allocation', () => {
+      const result = validateInvoice({
+        vendor: cashVendor,
+        method: 'Cash',
+        baseAmount: 2000,
+        feeAmount: 0,
+        totalAmount: 2000,
+        allocations: [{ accountId: 10, dollarAmount: 2000, credits: 5714 }],
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    test('Cash rejects nonzero fee', () => {
+      const result = validateInvoice({
+        vendor: cashVendor,
+        method: 'Cash',
+        baseAmount: 2000,
+        feeAmount: 10,
+        totalAmount: 2010,
+        allocations: [{ accountId: 10, dollarAmount: 2000, credits: 5714 }],
+      });
+      expect(result.valid).toBe(false);
+      expect(result.error).toMatch(/cash.*fee/i);
+    });
+
+    test('Cash enforces $1000 minimum', () => {
+      const result = validateInvoice({
+        vendor: cashVendor,
+        method: 'Cash',
+        baseAmount: 500,
+        feeAmount: 0,
+        totalAmount: 500,
+        allocations: [{ accountId: 10, dollarAmount: 500, credits: 1428 }],
+      });
+      expect(result.valid).toBe(false);
+      expect(result.error).toMatch(/minimum/i);
+    });
+
+    test('Cash supports credit-line repayment', () => {
+      const result = validateInvoice({
+        vendor: cashVendor,
+        method: 'Cash',
+        baseAmount: 3000,
+        feeAmount: 0,
+        totalAmount: 3000,
+        allocations: [{ accountId: 10, dollarAmount: 1000, credits: 2857 }],
+        creditLineRepayment: 2000,
+      });
+      expect(result.valid).toBe(true);
+    });
+  });
 });
 
 describe('validateCorrection', () => {
