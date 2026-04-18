@@ -173,6 +173,16 @@ export default function AdminDashboard() {
     }
   }
 
+  async function handleConfirmCash(invoiceId) {
+    try {
+      await axios.post(`/api/admin/invoices/${invoiceId}/confirm-cash`, {}, { headers: getAuthHeaders() });
+      fetchInvoices();
+    } catch (err) {
+      handleAuthError(err);
+      alert(err.response?.data?.error || 'Failed to confirm cash');
+    }
+  }
+
   async function handleTriggerLoad(invoiceId) {
     try {
       await axios.post(`/api/admin/invoices/${invoiceId}/trigger-load`, {}, { headers: getAuthHeaders() });
@@ -322,6 +332,7 @@ export default function AdminDashboard() {
             invoices={invoices}
             statuses={STATUSES}
             onConfirmWire={handleConfirmWire}
+            onConfirmCash={handleConfirmCash}
             onTriggerLoad={handleTriggerLoad}
             onMarkLoaded={handleMarkLoaded}
             onResendEmail={handleResendEmail}

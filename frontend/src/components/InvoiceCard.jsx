@@ -15,7 +15,7 @@ function timeAgo(dateStr) {
   return `${days}d`;
 }
 
-export default function InvoiceCard({ invoice, allocations, onConfirmWire, onTriggerLoad, onMarkLoaded, onResendEmail, onShowEvents, onDelete }) {
+export default function InvoiceCard({ invoice, allocations, onConfirmWire, onConfirmCash, onTriggerLoad, onMarkLoaded, onResendEmail, onShowEvents, onDelete }) {
   const [showReceipt, setShowReceipt] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -78,7 +78,16 @@ export default function InvoiceCard({ invoice, allocations, onConfirmWire, onTri
         </div>
 
         {/* Actions */}
-        {isPending && (
+        {isPending && invoice.method === 'Cash' && (
+          <button
+            onClick={() => onConfirmCash(invoice.id)}
+            className="mt-3 w-full text-xs font-semibold py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 transition"
+          >
+            Mark Cash Received
+          </button>
+        )}
+
+        {isPending && invoice.method !== 'Cash' && (
           <button
             onClick={() => onConfirmWire(invoice.id)}
             className="mt-3 w-full text-xs font-semibold py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 transition"

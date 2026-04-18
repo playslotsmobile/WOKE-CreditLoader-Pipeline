@@ -43,7 +43,7 @@ const HEADER_TEXT = {
 
 const COLUMN_PAGE_SIZE = 10;
 
-export default function InvoicePipeline({ invoices, statuses, onConfirmWire, onTriggerLoad, onMarkLoaded, onResendEmail, onShowEvents, onDelete }) {
+export default function InvoicePipeline({ invoices, statuses, onConfirmWire, onConfirmCash, onTriggerLoad, onMarkLoaded, onResendEmail, onShowEvents, onDelete }) {
   // Mobile: auto-expand columns that have items, collapse empty ones
   const [expanded, setExpanded] = useState(() => {
     const initial = {};
@@ -120,6 +120,7 @@ export default function InvoicePipeline({ invoices, statuses, onConfirmWire, onT
                         invoice={item.invoice}
                         allocations={item.allocations}
                         onConfirmWire={onConfirmWire}
+                        onConfirmCash={onConfirmCash}
                         onTriggerLoad={onTriggerLoad}
                         onMarkLoaded={onMarkLoaded}
                         onResendEmail={onResendEmail}
@@ -178,6 +179,7 @@ export default function InvoicePipeline({ invoices, statuses, onConfirmWire, onT
                         invoice={item.invoice}
                         allocations={item.allocations}
                         onConfirmWire={onConfirmWire}
+                        onConfirmCash={onConfirmCash}
                         onTriggerLoad={onTriggerLoad}
                         onMarkLoaded={onMarkLoaded}
                         onResendEmail={onResendEmail}
