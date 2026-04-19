@@ -185,7 +185,7 @@ async function handlePayment(paymentId, log) {
       // Still check for credit line repayment — repayment allocation is
       // separate from the load, so it should still happen even if the load
       // is blocked.
-      await maybeProcessCreditLineRepayment(invoice, log);
+      await creditLineService.processRepaymentIntent(invoice);
       continue;
     }
 
@@ -215,36 +215,6 @@ async function handlePayment(paymentId, log) {
         );
       } catch {}
     });
-  }
-}
-
-async function maybeProcessCreditLineRepayment(invoice, log) {
-  try {
-    const repaymentSetting = await prisma.setting.findUnique({
-      where: { key: `credit_line_repayment_${invoice.id}` },
-    });
-    if (!repaymentSetting) return;
-    const repaymentAmount = Number(repaymentSetting.value);
-    if (repaymentAmount <= 0) return;
-
-    await creditLineService.recordRepayment(invoice.vendorId, invoice.id, repaymentAmount);
-    const cl = await creditLineService.getCreditLine(invoice.vendorId);
-
-    await telegram.sendCreditLineRepayment(
-      { name: invoice.vendor.name, telegramChatId: invoice.vendor.telegramChatId },
-      repaymentAmount,
-      { usedAmount: Number(cl.usedAmount), capAmount: Number(cl.capAmount) }
-    );
-
-    await prisma.setting.delete({ where: { key: `credit_line_repayment_${invoice.id}` } });
-
-    log.info('Credit line repayment processed', {
-      invoiceId: invoice.id,
-      vendorId: invoice.vendorId,
-      repaymentAmount,
-    });
-  } catch (clErr) {
-    log.error('Credit line repayment processing failed', { error: clErr, invoiceId: invoice.id });
   }
 }
 

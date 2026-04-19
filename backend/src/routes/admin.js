@@ -5,6 +5,7 @@ const telegram = require('../services/telegram');
 const quickbooks = require('../services/quickbooks');
 const prisma = require('../db/client');
 const autoloader = require('../services/autoloader');
+const creditLineService = require('../services/creditLineService');
 const masterBalance = require('../services/masterBalance');
 const { requireAdmin, signToken } = require('../middleware/auth');
 const { logger } = require('../services/logger');
@@ -115,6 +116,10 @@ router.post('/invoices/:id/confirm-wire', async (req, res) => {
       data: { status: 'PAID', paidAt: new Date() },
     });
 
+    // Apply any credit line repayment intent stored at submission time.
+    // Safe for non-repayment invoices — no-op when the setting is absent.
+    await creditLineService.processRepaymentIntent(invoice);
+
     // Respond immediately, process load in background
     res.json({ success: true, message: 'Wire confirmed, loading credits...' });
 
@@ -148,6 +153,8 @@ router.post('/invoices/:id/confirm-cash', async (req, res) => {
       where: { id },
       data: { status: 'PAID', paidAt: new Date() },
     });
+
+    await creditLineService.processRepaymentIntent(invoice);
 
     res.json({ success: true, message: 'Cash confirmed, loading credits...' });
 

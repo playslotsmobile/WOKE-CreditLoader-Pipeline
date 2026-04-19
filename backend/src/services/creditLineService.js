@@ -1,5 +1,6 @@
 const prisma = require('../db/client');
 const { logger } = require('./logger');
+const telegram = require('./telegram');
 
 /**
  * Get credit line for a vendor. Returns null if vendor has no credit line.
@@ -106,9 +107,51 @@ async function recordRepayment(vendorId, invoiceId, amount) {
   return transaction;
 }
 
+/**
+ * Processes a pending credit line repayment intent for an invoice. Does
+ * nothing if no repayment setting exists. Idempotent — the setting is
+ * deleted after processing, so repeat calls are safe.
+ *
+ * Called from:
+ *   - webhookProcessor (QB card/ACH payment confirmed)
+ *   - admin /confirm-wire and /confirm-cash (offline payment confirmed)
+ *
+ * invoice must include { id, vendorId, vendor: { name, telegramChatId } }.
+ */
+async function processRepaymentIntent(invoice) {
+  try {
+    const repaymentSetting = await prisma.setting.findUnique({
+      where: { key: `credit_line_repayment_${invoice.id}` },
+    });
+    if (!repaymentSetting) return;
+    const repaymentAmount = Number(repaymentSetting.value);
+    if (repaymentAmount <= 0) return;
+
+    await recordRepayment(invoice.vendorId, invoice.id, repaymentAmount);
+    const cl = await getCreditLine(invoice.vendorId);
+
+    await telegram.sendCreditLineRepayment(
+      { name: invoice.vendor.name, telegramChatId: invoice.vendor.telegramChatId },
+      repaymentAmount,
+      { usedAmount: Number(cl.usedAmount), capAmount: Number(cl.capAmount) }
+    );
+
+    await prisma.setting.delete({ where: { key: `credit_line_repayment_${invoice.id}` } });
+
+    logger.info('Credit line repayment processed', {
+      invoiceId: invoice.id,
+      vendorId: invoice.vendorId,
+      repaymentAmount,
+    });
+  } catch (err) {
+    logger.error('Credit line repayment processing failed', { error: err, invoiceId: invoice.id });
+  }
+}
+
 module.exports = {
   getCreditLine,
   checkDrawAvailable,
   recordDraw,
   recordRepayment,
+  processRepaymentIntent,
 };
