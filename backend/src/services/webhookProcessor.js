@@ -204,7 +204,7 @@ async function handlePayment(paymentId, log) {
       );
     } catch {}
 
-    await maybeProcessCreditLineRepayment(invoice, log);
+    await creditLineService.processRepaymentIntent(invoice);
 
     autoloader.processInvoice(invoice.id).catch(async (err) => {
       log.error('Auto-loader failed', { invoiceId: invoice.id, error: err });
