@@ -130,11 +130,14 @@ app.use('/api', webhookRoutes);
 app.use('/api/admin', adminRoutes);
 
 // Serve failure screenshots for admin dashboard
+// requireAdmin accepts ?token= as fallback so <a href> direct opens work
 app.use('/api/screenshots', requireAdmin, express.static('/var/log/creditloader/failures'));
 
 // Serve wire receipt uploads for admin dashboard
-// No requireAdmin — img tags can't send Bearer tokens; filenames are unguessable timestamps
-app.use('/api/uploads', express.static(path.join(__dirname, '..', 'uploads')));
+// Now auth-gated. Filenames also moved to crypto.randomBytes for new uploads
+// (legacy wire-${Date.now()}.pdf still served — they were previously public,
+// no benefit to renaming retroactively without a separate migration).
+app.use('/api/uploads', requireAdmin, express.static(path.join(__dirname, '..', 'uploads')));
 
 // Serve frontend static files
 const publicPath = path.join(__dirname, '..', 'public');

@@ -27,10 +27,11 @@ async function run() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
   });
 
-  // 2. QuickBooks OAuth
+  // 2. QuickBooks OAuth — uses CompanyInfo (always exists, can't be deleted)
+  // instead of a specific customer name which would break this if renamed.
   await check('QuickBooks API', async () => {
     const qb = require('./services/quickbooks');
-    await qb.findCustomer('Cody Trejo');
+    await qb.qbRequest('GET', 'query?query=SELECT * FROM CompanyInfo');
   });
 
   // 3. Database

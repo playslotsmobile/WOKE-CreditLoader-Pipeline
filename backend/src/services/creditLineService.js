@@ -48,8 +48,18 @@ async function recordDraw(vendorId, invoiceId, amount) {
     throw new Error(`Draw of $${amount} would exceed cap of $${cl.capAmount}`);
   }
 
-  const [transaction] = await prisma.$transaction([
-    prisma.creditLineTransaction.create({
+  // Optimistic concurrency: only succeed if usedAmount is still what we read.
+  // If a concurrent draw raced ahead, the conditional update affects 0 rows
+  // and we abort instead of double-spending past the cap.
+  const transaction = await prisma.$transaction(async (tx) => {
+    const updated = await tx.creditLine.updateMany({
+      where: { id: cl.id, usedAmount: balanceBefore },
+      data: { usedAmount: balanceAfter },
+    });
+    if (updated.count !== 1) {
+      throw new Error('Credit line draw race detected — please retry');
+    }
+    return tx.creditLineTransaction.create({
       data: {
         creditLineId: cl.id,
         invoiceId,
@@ -58,12 +68,8 @@ async function recordDraw(vendorId, invoiceId, amount) {
         balanceBefore,
         balanceAfter,
       },
-    }),
-    prisma.creditLine.update({
-      where: { id: cl.id },
-      data: { usedAmount: balanceAfter },
-    }),
-  ]);
+    });
+  });
 
   logger.info('Credit line draw recorded', {
     vendorId, invoiceId, amount, balanceBefore, balanceAfter,
@@ -83,8 +89,17 @@ async function recordRepayment(vendorId, invoiceId, amount) {
   const balanceBefore = Number(cl.usedAmount);
   const balanceAfter = Math.max(0, balanceBefore - amount);
 
-  const [transaction] = await prisma.$transaction([
-    prisma.creditLineTransaction.create({
+  // Same optimistic concurrency as recordDraw — repayment vs draw races
+  // would otherwise lose one of the writes.
+  const transaction = await prisma.$transaction(async (tx) => {
+    const updated = await tx.creditLine.updateMany({
+      where: { id: cl.id, usedAmount: balanceBefore },
+      data: { usedAmount: balanceAfter },
+    });
+    if (updated.count !== 1) {
+      throw new Error('Credit line repayment race detected — please retry');
+    }
+    return tx.creditLineTransaction.create({
       data: {
         creditLineId: cl.id,
         invoiceId,
@@ -93,12 +108,8 @@ async function recordRepayment(vendorId, invoiceId, amount) {
         balanceBefore,
         balanceAfter,
       },
-    }),
-    prisma.creditLine.update({
-      where: { id: cl.id },
-      data: { usedAmount: balanceAfter },
-    }),
-  ]);
+    });
+  });
 
   logger.info('Credit line repayment recorded', {
     vendorId, invoiceId, amount, balanceBefore, balanceAfter,

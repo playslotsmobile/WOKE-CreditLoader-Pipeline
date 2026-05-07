@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const multer = require('multer');
 const quickbooks = require('../services/quickbooks');
 const telegram = require('../services/telegram');
@@ -10,6 +11,7 @@ const { validateInvoice, validateCorrection } = require('../services/validator')
 const { CASH_ALLOWED_SLUGS } = require('../constants/cash');
 const prisma = require('../db/client');
 const creditLineService = require('../services/creditLineService');
+const { resolveTargetAccountId } = require('../services/allocationHelpers');
 const { logger } = require('../services/logger');
 
 const uploadsDir = path.join(__dirname, '..', '..', 'uploads');
@@ -19,11 +21,19 @@ const upload = multer({
   storage: multer.diskStorage({
     destination: uploadsDir,
     filename: (req, file, cb) => {
-      const ext = path.extname(file.originalname);
-      cb(null, `wire-${Date.now()}${ext}`);
+      // Cryptographically-random filename so /api/uploads URLs aren't
+      // enumerable. Sanitize the extension to a small allowlist.
+      const rawExt = path.extname(file.originalname).toLowerCase();
+      const safeExt = ['.pdf', '.png', '.jpg', '.jpeg', '.webp', '.heic', '.heif'].includes(rawExt) ? rawExt : '';
+      const random = crypto.randomBytes(16).toString('hex');
+      cb(null, `wire-${random}${safeExt}`);
     },
   }),
   limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const okMime = /^(application\/pdf|image\/(png|jpeg|webp|heic|heif))$/.test(file.mimetype);
+    cb(okMime ? null : new Error('Unsupported file type'), okMime);
+  },
 });
 
 router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) => {
@@ -99,11 +109,7 @@ router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) =>
 
       // If this is an operator account with a parent vendor, swap to the parent
       // so the chain load works (parent → operator)
-      let targetAccountId = a.accountId;
-      const targetAccount = await prisma.vendorAccount.findUnique({ where: { id: a.accountId } });
-      if (targetAccount && targetAccount.parentVendorAccId) {
-        targetAccountId = targetAccount.parentVendorAccId;
-      }
+      const targetAccountId = await resolveTargetAccountId(a.accountId);
 
       const alloc = await prisma.invoiceAllocation.create({
         data: {

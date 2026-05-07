@@ -159,7 +159,7 @@ export default function EventTimeline({ invoiceId, token, onClose }) {
 
                       {evt.screenshotPath && (
                         <a
-                          href={evt.screenshotPath}
+                          href={`/api/screenshots/${evt.screenshotPath}?token=${encodeURIComponent(token || '')}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-block text-[10px] text-blue-400 hover:text-blue-300 mt-1 underline"

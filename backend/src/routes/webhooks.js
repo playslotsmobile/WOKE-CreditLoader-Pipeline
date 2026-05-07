@@ -12,11 +12,16 @@ function verifySignature(payload, signature) {
     log.warn('QB_WEBHOOK_TOKEN not set — rejecting webhook');
     return false;
   }
+  if (!signature || typeof signature !== 'string') return false;
   const hash = crypto
     .createHmac('sha256', webhookToken)
     .update(payload)
     .digest('base64');
-  return hash === signature;
+  // Timing-safe compare; lengths must match for timingSafeEqual
+  const a = Buffer.from(hash);
+  const b = Buffer.from(signature);
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
 }
 
 router.post('/qb-webhook', async (req, res) => {

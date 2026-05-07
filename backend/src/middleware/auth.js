@@ -1,14 +1,25 @@
 const jwt = require('jsonwebtoken');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'wokeavr-admin-secret-change-me';
+if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'wokeavr-admin-secret-change-me' || process.env.JWT_SECRET === 'change-me') {
+  throw new Error('JWT_SECRET must be set to a strong unique value (not default/placeholder)');
+}
+const JWT_SECRET = process.env.JWT_SECRET;
 
 function requireAdmin(req, res, next) {
+  // Prefer Authorization header. Fall back to ?token= query param for browser
+  // contexts that can't set headers (img tags, <a href> direct opens) — used
+  // by /api/screenshots/* and /api/uploads/*. Query-param tokens leak into
+  // access logs; only acceptable here because we control the audience (admin).
+  let token = null;
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.split(' ')[1];
+  } else if (req.query && typeof req.query.token === 'string') {
+    token = req.query.token;
+  }
+  if (!token) {
     return res.status(401).json({ error: 'Not authenticated' });
   }
-
-  const token = authHeader.split(' ')[1];
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.admin = decoded;

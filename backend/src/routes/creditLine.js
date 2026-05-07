@@ -5,6 +5,7 @@ const creditLineService = require('../services/creditLineService');
 const telegram = require('../services/telegram');
 const autoloader = require('../services/autoloader');
 const { validateInvoice } = require('../services/validator');
+const { resolveTargetAccountId } = require('../services/allocationHelpers');
 const { logger } = require('../services/logger');
 
 // Get credit line balance for a vendor (public — used by vendor form)
@@ -84,11 +85,7 @@ router.post('/submit-credit-line', async (req, res) => {
     for (const a of allocations) {
       if (a.dollarAmount <= 0) continue;
 
-      let targetAccountId = a.accountId;
-      const targetAccount = await prisma.vendorAccount.findUnique({ where: { id: a.accountId } });
-      if (targetAccount && targetAccount.parentVendorAccId) {
-        targetAccountId = targetAccount.parentVendorAccId;
-      }
+      const targetAccountId = await resolveTargetAccountId(a.accountId);
 
       const alloc = await prisma.invoiceAllocation.create({
         data: {

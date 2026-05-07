@@ -25,7 +25,10 @@ export default function InvoiceCard({ invoice, allocations, onConfirmWire, onCon
   const isRequested = invoice.status === 'REQUESTED';
   const canResend = (isRequested || isPending) && invoice.qbInvoiceId;
 
-  const receiptUrl = invoice.wireReceiptPath ? `/api/uploads/${invoice.wireReceiptPath}` : null;
+  const adminToken = typeof window !== 'undefined' ? localStorage.getItem('admin_token') : null;
+  const receiptUrl = invoice.wireReceiptPath
+    ? `/api/uploads/${invoice.wireReceiptPath}?token=${encodeURIComponent(adminToken || '')}`
+    : null;
 
   return (
     <>

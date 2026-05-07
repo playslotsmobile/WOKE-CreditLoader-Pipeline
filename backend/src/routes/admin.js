@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
+const rateLimit = require('express-rate-limit');
 const telegram = require('../services/telegram');
 const quickbooks = require('../services/quickbooks');
 const prisma = require('../db/client');
@@ -10,8 +11,18 @@ const masterBalance = require('../services/masterBalance');
 const { requireAdmin, signToken } = require('../middleware/auth');
 const { logger } = require('../services/logger');
 
+// Rate limiter for /login: 5 attempts per 15 min per IP. Bcrypt slows attackers
+// per-attempt; this stops sustained brute-force.
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many login attempts. Try again in 15 minutes.' },
+});
+
 // Login
-router.post('/login', async (req, res) => {
+router.post('/login', loginLimiter, async (req, res) => {
   try {
     const { username, password } = req.body;
     if (!username || !password) {
@@ -31,7 +42,7 @@ router.post('/login', async (req, res) => {
     const token = signToken(admin.id, admin.username);
     res.json({ token, username: admin.username });
   } catch (err) {
-    console.error('Login error:', err);
+    logger.error('Login error', { error: err });
     res.status(500).json({ error: 'Login failed' });
   }
 });
@@ -89,7 +100,7 @@ router.get('/invoices', async (req, res) => {
 
     res.json(formatted);
   } catch (err) {
-    console.error('Get invoices error:', err);
+    logger.error('Get invoices error', { error: err });
     res.status(500).json({ error: 'Failed to fetch invoices' });
   }
 });
@@ -125,10 +136,10 @@ router.post('/invoices/:id/confirm-wire', async (req, res) => {
 
     // Auto-load in background
     autoloader.processInvoice(id).catch((err) => {
-      console.error('Auto-loader failed for wire invoice:', err.message);
+      logger.error('Auto-loader failed for wire invoice', { invoiceId: id, error: err.message });
     });
   } catch (err) {
-    console.error('Confirm wire error:', err);
+    logger.error('Confirm wire error', { error: err });
     res.status(500).json({ error: 'Failed to confirm wire' });
   }
 });
@@ -159,10 +170,10 @@ router.post('/invoices/:id/confirm-cash', async (req, res) => {
     res.json({ success: true, message: 'Cash confirmed, loading credits...' });
 
     autoloader.processInvoice(id).catch((err) => {
-      console.error('Auto-loader failed for cash invoice:', err.message);
+      logger.error('Auto-loader failed for cash invoice', { invoiceId: id, error: err.message });
     });
   } catch (err) {
-    console.error('Confirm cash error:', err);
+    logger.error('Confirm cash error', { error: err });
     res.status(500).json({ error: 'Failed to confirm cash' });
   }
 });
@@ -183,10 +194,10 @@ router.post('/invoices/:id/trigger-load', async (req, res) => {
 
     // Auto-load in background
     autoloader.processInvoice(id).catch((err) => {
-      console.error('Auto-loader failed:', err.message);
+      logger.error('Auto-loader failed', { invoiceId: id, error: err.message });
     });
   } catch (err) {
-    console.error('Trigger load error:', err);
+    logger.error('Trigger load error', { error: err });
     res.status(500).json({ error: 'Failed to trigger load' });
   }
 });
@@ -236,7 +247,7 @@ router.post('/invoices/:id/mark-loaded', async (req, res) => {
     logger.info('Invoice marked as loaded manually', { invoiceId: id, jobsUpdated: openJobs.length });
     res.json({ success: true, message: `Invoice ${id} marked as loaded`, jobsUpdated: openJobs.length });
   } catch (err) {
-    console.error('Mark loaded error:', err);
+    logger.error('Mark loaded error', { error: err });
     res.status(500).json({ error: 'Failed to mark as loaded' });
   }
 });
@@ -283,7 +294,7 @@ router.delete('/invoices/:id', async (req, res) => {
 
     res.json({ success: true, message: `Invoice ${id} deleted` });
   } catch (err) {
-    console.error('Delete invoice error:', err);
+    logger.error('Delete invoice error', { error: err });
     res.status(500).json({ error: 'Failed to delete invoice' });
   }
 });
@@ -303,7 +314,7 @@ router.post('/invoices/:id/resend-email', async (req, res) => {
     await quickbooks.sendInvoiceEmail(invoice.qbInvoiceId, invoice.vendor.email);
     res.json({ success: true, message: `Invoice email resent to ${invoice.vendor.email}` });
   } catch (err) {
-    console.error('Resend email error:', err);
+    logger.error('Resend email error', { error: err });
     res.status(500).json({ error: 'Failed to resend invoice email' });
   }
 });
@@ -337,7 +348,7 @@ router.get('/corrections', async (req, res) => {
 
     res.json(formatted);
   } catch (err) {
-    console.error('Corrections error:', err);
+    logger.error('Corrections error', { error: err });
     res.status(500).json({ error: 'Failed to fetch corrections' });
   }
 });
@@ -367,12 +378,15 @@ router.get('/invoices/:id/events', async (req, res) => {
       },
     });
 
+    const path = require('path');
     const formatted = events.map((e) => ({
       id: e.id,
       step: e.step,
       status: e.status,
       metadata: e.metadata,
-      screenshotPath: e.screenshotPath,
+      // Strip absolute disk path → basename so the frontend can build the
+      // proper URL via the auth-gated /api/screenshots/<basename> static mount.
+      screenshotPath: e.screenshotPath ? path.basename(e.screenshotPath) : null,
       account: e.loadJob?.vendorAccount?.username,
       platform: e.loadJob?.vendorAccount?.platform,
       createdAt: e.createdAt,
@@ -402,16 +416,6 @@ router.post('/2fa-code', async (req, res) => {
   } catch (err) {
     logger.error('2FA code submission failed', { error: err });
     res.status(500).json({ error: 'Failed to submit 2FA code' });
-  }
-});
-
-// Check if 2FA is currently needed
-router.get('/2fa-status', async (req, res) => {
-  try {
-    const setting = await prisma.setting.findUnique({ where: { key: 'play777_2fa_code' } });
-    res.json({ needed: false });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to check 2FA status' });
   }
 });
 
@@ -470,7 +474,7 @@ router.get('/vendor-stats', async (req, res) => {
 
     res.json(stats);
   } catch (err) {
-    console.error('Vendor stats error:', err);
+    logger.error('Vendor stats error', { error: err });
     res.status(500).json({ error: 'Failed to fetch vendor stats' });
   }
 });
@@ -551,7 +555,7 @@ router.get('/stats', async (req, res) => {
       vendors,
     });
   } catch (err) {
-    console.error('Stats error:', err);
+    logger.error('Stats error', { error: err });
     res.status(500).json({ error: 'Failed to fetch stats' });
   }
 });
