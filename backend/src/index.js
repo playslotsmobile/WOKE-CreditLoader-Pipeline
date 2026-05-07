@@ -14,6 +14,9 @@ const { logger } = require('./services/logger');
 const { requireAdmin } = require('./middleware/auth');
 
 const app = express();
+// Behind nginx/Cloudflare — trust the first proxy hop so X-Forwarded-For works.
+// Required for express-rate-limit to bucket per real client IP, not per proxy.
+app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json({
   verify: (req, res, buf) => {
