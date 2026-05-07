@@ -10,6 +10,28 @@ const DRY_RUN = process.env.DRY_RUN === 'true';
 const MAX_RETRIES = 3;
 const RETRY_DELAYS = [30000, 60000, 120000]; // 30s, 60s, 2min
 
+// If any failed result carries a "Wait Xs before retrying" hint from the
+// browser rate-limiter, honor it (plus a small buffer) instead of the fixed
+// schedule. Otherwise the retry fires while the rate-limit window is still
+// closed and burns an attempt for no reason — which is exactly what happened
+// to invoice 243 on May 2/3.
+function computeRetryDelay(failedResults, retryCount) {
+  const baseDelay = RETRY_DELAYS[retryCount];
+  let maxHinted = 0;
+  for (const r of failedResults || []) {
+    const m = r && r.error && /Wait\s+(\d+)s\s+before retrying/i.exec(r.error);
+    if (m) {
+      const seconds = parseInt(m[1], 10);
+      if (seconds > maxHinted) maxHinted = seconds;
+    }
+  }
+  if (maxHinted > 0) {
+    const hintedMs = (maxHinted + 5) * 1000; // 5s buffer past the window
+    return Math.max(hintedMs, baseDelay);
+  }
+  return baseDelay;
+}
+
 // Sequential load queue — only one invoice processes at a time
 const loadQueue = [];
 let processing = false;
@@ -331,7 +353,7 @@ async function processInvoiceInternal(invoiceId, retryCount = 0) {
     const attempt = retryCount + 1;
 
     if (attempt < MAX_RETRIES) {
-      const delayMs = RETRY_DELAYS[retryCount];
+      const delayMs = computeRetryDelay(failed, retryCount);
       logger.error('Loads failed, retrying', {
         invoiceId,
         failedCount: failed.length,

@@ -68,9 +68,19 @@ async function readPlay777FromDashboard(page) {
       waitUntil: 'domcontentloaded',
       timeout: 60000,
     });
+    // The SPA hydrates the balance well after DOMContentLoaded. Wait for
+    // network idle so the API call that populates the balance has a chance
+    // to settle before we start polling.
+    try {
+      await page.waitForLoadState('networkidle', { timeout: 15000 });
+    } catch {
+      // Networkidle is best-effort — some pages keep long-poll connections
+      // open. Polling the body still works regardless.
+    }
 
-    // Poll for up to 10s: the balance is rendered async after the label.
-    const deadline = Date.now() + 10000;
+    // Poll for up to 30s: the balance is rendered async after the label.
+    // Bumped from 10s — observed dashboard loads taking 12–20s under load.
+    const deadline = Date.now() + 30000;
     while (Date.now() < deadline) {
       const text = await page.evaluate(() => document.body.innerText || '');
       const match = text.match(/Current Balance[^\d$-]*\$?([\d,]+\.?\d*)/i);
@@ -89,23 +99,46 @@ async function readPlay777FromDashboard(page) {
   // Fallback: navigate to the my-balance page and read the running balance
   // from the first row's cells[6]. This is the same path the opportunistic
   // capture uses and is known to be reliable.
-  try {
-    await page.goto('https://pna.play777games.com/history/my-balance', {
-      waitUntil: 'domcontentloaded',
-      timeout: 60000,
-    });
+  // Two attempts: a fresh navigation can race with the SPA's table hydration,
+  // so on first miss we reload and wait longer before giving up.
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      await page.locator('table tbody tr').first().waitFor({ state: 'attached', timeout: 15000 });
-    } catch {
-      logger.warn('readPlay777 fallback: my-balance table did not load');
+      if (attempt === 0) {
+        await page.goto('https://pna.play777games.com/history/my-balance', {
+          waitUntil: 'domcontentloaded',
+          timeout: 60000,
+        });
+      } else {
+        await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+      }
+      try {
+        await page.waitForLoadState('networkidle', { timeout: 15000 });
+      } catch {}
+      try {
+        await page
+          .locator('table tbody tr')
+          .first()
+          .waitFor({ state: 'attached', timeout: 45000 });
+      } catch {
+        if (attempt === 0) {
+          logger.warn('readPlay777 fallback: my-balance table did not load — reloading');
+          continue;
+        }
+        logger.warn('readPlay777 fallback: my-balance table did not load');
+        return null;
+      }
+      await page.waitForTimeout(1500);
+      return await readPlay777FromMyBalance(page);
+    } catch (fbErr) {
+      if (attempt === 0) {
+        logger.warn('readPlay777 fallback errored — retrying once', { error: fbErr.message });
+        continue;
+      }
+      logger.warn('readPlay777 fallback failed', { error: fbErr.message });
       return null;
     }
-    await page.waitForTimeout(1000);
-    return await readPlay777FromMyBalance(page);
-  } catch (fbErr) {
-    logger.warn('readPlay777 fallback failed', { error: fbErr.message });
-    return null;
   }
+  return null;
 }
 
 // iConnect: reads "Your balance: NNN usd" from the `/agent/show` page banner.

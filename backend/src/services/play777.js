@@ -311,12 +311,32 @@ async function loadOperator(page, vendor, operator, credits, transactionType = '
 async function verifyTransaction(page, expectedAccount, expectedType, expectedCredits, jobId = 0) {
   try {
     await page.goto(MY_BALANCE_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    try {
+      await page.waitForLoadState('networkidle', { timeout: 15000 });
+    } catch {}
     await humanDelay(5000, 8000);
 
-    // Wait for the table to load
-    try {
-      await page.locator('table tbody tr').first().waitFor({ state: 'attached', timeout: 30000 });
-    } catch {
+    // Wait for the table to load. The SPA hydrates the rows after an XHR
+    // settles — observed taking 30–45s under load. Reload once before giving
+    // up rather than skipping verification on a slow page.
+    let tableLoaded = false;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await page.locator('table tbody tr').first().waitFor({ state: 'attached', timeout: 45000 });
+        tableLoaded = true;
+        break;
+      } catch {
+        if (attempt === 0) {
+          logger.warn('My Balance table did not load — reloading', { jobId });
+          await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+          try {
+            await page.waitForLoadState('networkidle', { timeout: 15000 });
+          } catch {}
+          await humanDelay(3000, 5000);
+        }
+      }
+    }
+    if (!tableLoaded) {
       logger.warn('My Balance table did not load — skipping verification', { jobId });
       return { verified: false, reason: 'Table did not load' };
     }
