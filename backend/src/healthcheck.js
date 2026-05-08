@@ -1,10 +1,11 @@
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
-const TelegramBot = require('node-telegram-bot-api');
-
-const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: false });
+// Reuse the single TelegramBot instance from services/telegram.js instead of
+// constructing a second one — two instances would race if either ever
+// switched from polling: false.
+const { bot } = require('./services/telegram');
 const ADMIN_CHAT_ID = process.env.TELEGRAM_ADMIN_CHAT_ID;
 
-const ADSPOWER_API = 'http://local.adspower.net:50325';
+const ADSPOWER_API = process.env.ADSPOWER_API_URL || 'http://127.0.0.1:50325';
 const ADSPOWER_TOKEN = process.env.ADSPOWER_API_KEY;
 
 const checks = [];

@@ -82,35 +82,35 @@ router.get('/invoices', async (req, res) => {
     const formatted = invoices.map((inv) => {
       const repaymentTxn = inv.creditLineTransactions.find((t) => t.type === 'REPAYMENT');
       return {
-      vendor: {
-        slug: inv.vendor.slug,
-        name: inv.vendor.name,
-        businessName: inv.vendor.businessName,
-      },
-      invoice: {
-        id: inv.id,
-        vendorSlug: inv.vendor.slug,
-        qbInvoiceId: inv.qbInvoiceId,
-        method: inv.method,
-        baseAmount: Number(inv.baseAmount),
-        feeAmount: Number(inv.feeAmount),
-        totalAmount: Number(inv.totalAmount),
-        status: inv.status,
-        submittedAt: inv.submittedAt,
-        paidAt: inv.paidAt,
-        loadedAt: inv.loadedAt,
-        wireReceiptPath: inv.wireReceiptPath,
-        creditLineRepayment: repaymentTxn ? Number(repaymentTxn.amount) : null,
-      },
-      allocations: inv.allocations.map((a) => ({
-        accountId: a.vendorAccountId,
-        dollarAmount: Number(a.dollarAmount),
-        credits: a.credits,
-        platform: a.vendorAccount.platform,
-        username: a.vendorAccount.username,
-        operatorId: a.vendorAccount.operatorId,
-      })),
-    };
+        vendor: {
+          slug: inv.vendor.slug,
+          name: inv.vendor.name,
+          businessName: inv.vendor.businessName,
+        },
+        invoice: {
+          id: inv.id,
+          vendorSlug: inv.vendor.slug,
+          qbInvoiceId: inv.qbInvoiceId,
+          method: inv.method,
+          baseAmount: Number(inv.baseAmount),
+          feeAmount: Number(inv.feeAmount),
+          totalAmount: Number(inv.totalAmount),
+          status: inv.status,
+          submittedAt: inv.submittedAt,
+          paidAt: inv.paidAt,
+          loadedAt: inv.loadedAt,
+          wireReceiptPath: inv.wireReceiptPath,
+          creditLineRepayment: repaymentTxn ? Number(repaymentTxn.amount) : null,
+        },
+        allocations: inv.allocations.map((a) => ({
+          accountId: a.vendorAccountId,
+          dollarAmount: Number(a.dollarAmount),
+          credits: a.credits,
+          platform: a.vendorAccount.platform,
+          username: a.vendorAccount.username,
+          operatorId: a.vendorAccount.operatorId,
+        })),
+      };
     });
 
     res.json(formatted);
@@ -123,7 +123,7 @@ router.get('/invoices', async (req, res) => {
 // Confirm wire received
 router.post('/invoices/:id/confirm-wire', async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id, 10);
     const invoice = await prisma.invoice.findUnique({
       where: { id },
       include: {
@@ -162,7 +162,7 @@ router.post('/invoices/:id/confirm-wire', async (req, res) => {
 // Admin confirms cash was received — flips PENDING Cash → PAID and triggers autoload.
 router.post('/invoices/:id/confirm-cash', async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id, 10);
     const invoice = await prisma.invoice.findUnique({
       where: { id },
       include: {
@@ -196,7 +196,7 @@ router.post('/invoices/:id/confirm-cash', async (req, res) => {
 // Manual load trigger
 router.post('/invoices/:id/trigger-load', async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id, 10);
     const invoice = await prisma.invoice.findUnique({ where: { id } });
 
     if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
@@ -223,7 +223,7 @@ router.post('/invoices/:id/trigger-load', async (req, res) => {
 // notify the vendor (operator handles that out-of-band).
 router.post('/invoices/:id/mark-loaded', async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id, 10);
     const invoice = await prisma.invoice.findUnique({ where: { id } });
     if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
     const allowedFrom = ['FAILED', 'PAID', 'BLOCKED_LOW_MASTER'];
@@ -270,7 +270,7 @@ router.post('/invoices/:id/mark-loaded', async (req, res) => {
 // Delete invoice
 router.delete('/invoices/:id', async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id, 10);
     const invoice = await prisma.invoice.findUnique({
       where: { id },
       include: { vendor: true },
@@ -317,7 +317,7 @@ router.delete('/invoices/:id', async (req, res) => {
 // Resend QB invoice email
 router.post('/invoices/:id/resend-email', async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id, 10);
     const invoice = await prisma.invoice.findUnique({
       where: { id },
       include: { vendor: true },
@@ -371,7 +371,7 @@ router.get('/corrections', async (req, res) => {
 // Load events for an invoice (timeline view)
 router.get('/invoices/:id/events', async (req, res) => {
   try {
-    const invoiceId = parseInt(req.params.id);
+    const invoiceId = parseInt(req.params.id, 10);
 
     const loadJobs = await prisma.loadJob.findMany({
       where: { invoiceId },
@@ -531,7 +531,7 @@ router.get('/stats', async (req, res) => {
 // Update vendor account rate
 router.post('/accounts/:id/rate', async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id, 10);
     const { rate } = req.body;
 
     if (rate === undefined || rate === null || typeof rate !== 'number' || rate < 0 || rate > 1) {

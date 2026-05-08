@@ -51,7 +51,9 @@ async function ensureLoggedIn(page) {
         process.env.TELEGRAM_ADMIN_CHAT_ID,
         '🔐 Play777 requires 2FA.\n\nEnter code in admin dashboard (Settings → 2FA Code) within 5 minutes.'
       );
-    } catch {}
+    } catch (alertErr) {
+      logger.error('Telegram 2FA-prompt alert failed — admin will not see the prompt!', { error: alertErr.message });
+    }
 
     const code = await poll2FACode();
     if (!code) {

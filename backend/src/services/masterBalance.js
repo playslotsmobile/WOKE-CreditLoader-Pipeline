@@ -382,7 +382,9 @@ async function maybeAutoResume(platform) {
       ADMIN_CHAT_ID,
       `▶️ Auto-resumed ${toResume.length} blocked invoice${toResume.length === 1 ? '' : 's'} (${platform} back above critical)\n\n${lines}`
     );
-  } catch {}
+  } catch (alertErr) {
+    logger.warn('Telegram auto-resume alert send failed', { platform, count: toResume.length, error: alertErr.message });
+  }
 
   return { resumed: toResume.length, invoiceIds: toResume.map((i) => i.id) };
 }

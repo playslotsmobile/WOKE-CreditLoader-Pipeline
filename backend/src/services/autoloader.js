@@ -502,7 +502,12 @@ async function executeLoad(job, platform, account, credits, parentVendor, transa
     data: {
       status: result.success ? 'SUCCESS' : 'FAILED',
       attempts: { increment: 1 },
-      errorMessage: result.success ? null : (result.error || 'Unknown error'),
+      // No 'Unknown error' fallback — if a driver fails without a message,
+      // surface that as a bug locator instead of swallowing it (per the
+      // no-unknown-errors rule).
+      errorMessage: result.success
+        ? null
+        : (result.error || `[bug] ${result.platform || platform} returned success=false with empty .error`),
       completedAt: result.success ? new Date() : null,
     },
   });

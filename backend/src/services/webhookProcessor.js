@@ -50,7 +50,9 @@ async function processWebhookEvent(event) {
           process.env.TELEGRAM_ADMIN_CHAT_ID,
           `🚨 Webhook processing FAILED after ${MAX_ATTEMPTS} attempts\n\nEvent #${event.id}\nSource: ${event.source}\nError: ${err.message}`
         );
-      } catch {}
+      } catch (alertErr) {
+        log.warn('Telegram FAILED-webhook alert send failed', { error: alertErr.message });
+      }
     }
   }
 }
@@ -177,7 +179,9 @@ async function handlePayment(paymentId, log) {
           { totalAmount: invoice.totalAmount, id: invoice.id },
           { isRepaymentOnly: (invoice.allocations || []).length === 0 }
         );
-      } catch {}
+      } catch (alertErr) {
+        log.warn('Telegram vendor-paid (blocked) notification failed', { invoiceId: invoice.id, error: alertErr.message });
+      }
 
       // Admin-only alert with full context including per-platform credit
       // math so the admin knows exactly how short we are and how much to refill.
@@ -194,7 +198,9 @@ async function handlePayment(paymentId, log) {
           process.env.TELEGRAM_ADMIN_CHAT_ID,
           `⛔ Invoice BLOCKED — insufficient master credits\n\nInvoice #${invoice.id}\nVendor: ${invoice.vendor.name}\nAmount: $${Number(invoice.totalAmount).toLocaleString('en-US', { minimumFractionDigits: 2 })}\nPayment ID: ${paymentId}\n\n${lines}\n\nRefill the master and the invoice will auto-resume on the next balance sweep (every 2h) — or hit "Force Sweep" in admin to trigger immediately. Vendor was NOT told about this.`
         );
-      } catch {}
+      } catch (alertErr) {
+        log.error('Telegram BLOCKED admin alert send failed — admin will not see this block!', { invoiceId: invoice.id, error: alertErr.message });
+      }
 
       // Still check for credit line repayment — repayment allocation is
       // separate from the load, so it should still happen even if the load
@@ -216,7 +222,9 @@ async function handlePayment(paymentId, log) {
         { totalAmount: invoice.totalAmount, id: invoice.id },
         { isRepaymentOnly: (invoice.allocations || []).length === 0 }
       );
-    } catch {}
+    } catch (alertErr) {
+      log.warn('Telegram vendor-paid notification failed', { invoiceId: invoice.id, error: alertErr.message });
+    }
 
     await creditLineService.processRepaymentIntent(invoice);
 
@@ -227,7 +235,9 @@ async function handlePayment(paymentId, log) {
           process.env.TELEGRAM_ADMIN_CHAT_ID,
           `🚨 AUTO-LOAD FAILED 🚨\n\nInvoice #${invoice.id}\nVendor: ${invoice.vendor.name}\nPayment ID: ${paymentId}\nError: ${err.message}\n\nUse the admin dashboard to retry.`
         );
-      } catch {}
+      } catch (alertErr) {
+        log.error('Telegram AUTO-LOAD-FAILED admin alert send failed', { invoiceId: invoice.id, error: alertErr.message });
+      }
     });
   }
 }

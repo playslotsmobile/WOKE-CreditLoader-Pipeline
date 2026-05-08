@@ -132,9 +132,8 @@ app.get('/api/qb-callback', async (req, res) => {
       return res.status(500).send('Token exchange failed: ' + JSON.stringify(data));
     }
 
-    // Save to DB
-    process.env.QB_REFRESH_TOKEN = data.refresh_token;
-    process.env.QB_REALM_ID = realmId;
+    // Save to DB. (Don't mutate process.env — quickbooks.js reads from DB
+    // anyway; the mutation was misleading dead state from older code.)
     await prisma.setting.upsert({
       where: { key: 'qb_refresh_token' },
       update: { value: data.refresh_token },
