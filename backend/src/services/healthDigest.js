@@ -125,7 +125,11 @@ async function reconcileQBPayments(since) {
 
     for (const payment of payments) {
       const paymentId = String(payment.Id);
-      const processed = await prisma.processedWebhook.findUnique({
+      // findFirst (not findUnique) since the unique was relaxed from
+      // paymentId alone to (paymentId, invoiceId) in Deploy 3 — for
+      // reconciliation we just want to know if this payment was processed
+      // for ANY invoice.
+      const processed = await prisma.processedWebhook.findFirst({
         where: { paymentId },
       });
       if (!processed) {
