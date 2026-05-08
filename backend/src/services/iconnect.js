@@ -1,4 +1,4 @@
-const { getBrowserContext, closeBrowser, humanDelay, humanType, humanMouseMove } = require('./browser');
+const { getBrowserContext, closeBrowser, humanDelay, humanType, humanMouseMove, isCrashError } = require('./browser');
 const { restoreSession, saveSession } = require('./browserSession');
 const { captureFailure } = require('./screenshot');
 const { logger } = require('./logger');
@@ -40,6 +40,24 @@ async function ensureLoggedIn(page) {
 }
 
 async function loadCredits(account, credits, jobId = 0) {
+  // Same crash-recovery pattern as play777. iConnect crashes much less often
+  // (no Cloudflare layer) but AdsPower's daemon failure still affects both.
+  const MAX_CRASH_RETRIES = 1;
+  let crashRetries = 0;
+  while (true) {
+    const result = await loadCreditsAttempt(account, credits, jobId);
+    if (result.success || !isCrashError({ message: result.error || '' }) || crashRetries >= MAX_CRASH_RETRIES) {
+      return result;
+    }
+    crashRetries++;
+    logger.warn('iConnect: AdsPower crash detected, retrying once on fresh profile', {
+      attempt: crashRetries, error: result.error, account: account.username,
+    });
+    await new Promise((r) => setTimeout(r, 20000));
+  }
+}
+
+async function loadCreditsAttempt(account, credits, jobId = 0) {
   let session;
 
   const doLoad = async () => {

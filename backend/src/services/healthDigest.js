@@ -38,6 +38,22 @@ async function sendDailyDigest() {
       adspowerOk = data.code === 0;
     } catch {}
 
+    // Count AdsPower daemon crashes in the last 24h via journalctl. The
+    // crash signature is "GPU process isn't usable. Goodbye." which the
+    // adspower systemd unit logs whenever its Electron daemon dies.
+    // Healthy baseline: ~1 crash/week. Alert if > 5 in 24h.
+    let adspowerCrashes24h = null;
+    try {
+      const { execSync } = require('child_process');
+      const out = execSync(
+        `journalctl -u adspower --since "24 hours ago" --no-pager | grep -c "GPU process isn.t usable" || true`,
+        { encoding: 'utf8', timeout: 5000 }
+      );
+      adspowerCrashes24h = parseInt(out.trim(), 10);
+    } catch (e) {
+      // journalctl not available or permission denied — fine, just skip.
+    }
+
     const quickbooks = require('./quickbooks');
     let qbOk = false;
     try {
@@ -72,7 +88,13 @@ ${iconnectLine}
 
 Infrastructure:
 ${adspowerOk ? '✅' : '❌'} AdsPower API
-${qbOk ? '✅ QB Token: OK' : '⚠️ QB Token: EXPIRED — manual reauth required'}
+${adspowerCrashes24h == null
+  ? ''
+  : adspowerCrashes24h === 0
+  ? '✅ AdsPower daemon stable (0 crashes 24h)\n'
+  : adspowerCrashes24h <= 2
+  ? `📉 AdsPower: ${adspowerCrashes24h} crash(es) 24h\n`
+  : `⚠️ AdsPower: ${adspowerCrashes24h} crashes in 24h — investigate\n`}${qbOk ? '✅ QB Token: OK' : '⚠️ QB Token: EXPIRED — manual reauth required'}
 ${failedWebhooks > 0 ? `⚠️ ${failedWebhooks} failed webhooks` : '✅ Webhooks OK'}
 
 ⏰ ${new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' })}`;

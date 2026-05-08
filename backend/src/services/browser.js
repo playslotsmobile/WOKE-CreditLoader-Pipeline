@@ -16,6 +16,16 @@ const launchHistory = {};
 const MAX_LAUNCHES = 3;
 const WINDOW_MS = 10 * 60 * 1000; // 10 minutes
 
+// Inter-launch minimum cooldown per platform. AdsPower's Electron daemon
+// crashes more often when profiles are spawned in rapid succession (observed
+// ~75% failure rate at 3 launches in 6 min vs ~0% at 1 launch per hour).
+const MIN_INTERLAUNCH_MS = {
+  play777: 60 * 1000,   // Play777 has Cloudflare anti-bot scripts that may
+                        // crash the renderer; give it space.
+  iconnect: 30 * 1000,  // iConnect is more forgiving.
+};
+const lastLaunchAt = {};
+
 function checkRateLimit(platform) {
   const now = Date.now();
   if (!launchHistory[platform]) launchHistory[platform] = [];
@@ -26,6 +36,36 @@ function checkRateLimit(platform) {
     throw new Error(`Rate limit: ${MAX_LAUNCHES} browser launches in ${WINDOW_MS / 60000}min window. Wait ${waitSec}s before retrying.`);
   }
   launchHistory[platform].push(now);
+}
+
+async function enforceInterlaunchCooldown(platform) {
+  const min = MIN_INTERLAUNCH_MS[platform];
+  if (!min) return;
+  const last = lastLaunchAt[platform];
+  if (!last) return;
+  const elapsed = Date.now() - last;
+  if (elapsed < min) {
+    const waitMs = min - elapsed;
+    logger.info('Inter-launch cooldown', { platform, waitMs });
+    await new Promise((r) => setTimeout(r, waitMs));
+  }
+}
+
+// Returns true if an error message looks like an AdsPower / Chromium crash
+// rather than a logic / selector failure. Used by callers to decide whether
+// a retry on a freshly-launched profile is worth attempting.
+function isCrashError(err) {
+  if (!err) return false;
+  const msg = (err.message || String(err)).toLowerCase();
+  return (
+    msg.includes('target page, context or browser has been closed') ||
+    msg.includes('browser has been closed') ||
+    msg.includes('target closed') ||
+    msg.includes('browserdisconnected') ||
+    msg.includes('connection closed') ||
+    msg.includes('failed to start adspower profile') ||
+    msg.includes('adspower is not responding')
+  );
 }
 
 // Human-like delay — randomized to look natural
@@ -92,6 +132,8 @@ async function getBrowserContext(platform) {
   }
 
   checkRateLimit(platform);
+  await enforceInterlaunchCooldown(platform);
+  lastLaunchAt[platform] = Date.now();
 
   // Health check — try to recover if AdsPower is down
   let healthy = await checkAdsPowerHealth();
@@ -183,6 +225,47 @@ async function closeBrowser(session) {
   }
 }
 
+/**
+ * Run an operation that needs a fresh browser context, and recover ONCE if
+ * the underlying AdsPower profile / Chromium process crashes mid-flow
+ * ("Target page closed", "browser has been closed", etc).
+ *
+ * Use:  withBrowserRecovery('play777', async (session) => { ...page work... })
+ *
+ * The wrapper handles getBrowserContext + closeBrowser bookkeeping itself, so
+ * the inner fn is just the work. On a crash-shaped error, it waits 15s for
+ * AdsPower's auto-recovery (browser.js already restarts the systemd unit on
+ * checkAdsPowerHealth failure), then retries with a fresh profile launch.
+ *
+ * Caps recovery at ONE retry to avoid burning the rate-limit window. Real
+ * persistent failures still propagate so the autoloader's outer retry can
+ * decide whether to back off harder.
+ */
+async function withBrowserRecovery(platform, fn) {
+  let session;
+  try {
+    session = await getBrowserContext(platform);
+    return await fn(session);
+  } catch (err) {
+    if (!isCrashError(err)) throw err;
+    logger.warn('Browser crash detected — attempting one recovery retry', {
+      platform, error: err.message,
+    });
+    if (session) {
+      try { await closeBrowser(session); } catch {}
+      session = null;
+    }
+    // Wait for AdsPower's restart-on-recovery path inside getBrowserContext.
+    await new Promise((r) => setTimeout(r, 15000));
+    session = await getBrowserContext(platform);
+    return await fn(session);
+  } finally {
+    if (session) {
+      try { await closeBrowser(session); } catch {}
+    }
+  }
+}
+
 module.exports = {
   getBrowserContext,
   closeBrowser,
@@ -190,4 +273,6 @@ module.exports = {
   humanType,
   humanMouseMove,
   checkAdsPowerHealth,
+  isCrashError,
+  withBrowserRecovery,
 };

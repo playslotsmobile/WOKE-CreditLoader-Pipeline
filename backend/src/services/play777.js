@@ -1,4 +1,4 @@
-const { getBrowserContext, closeBrowser, humanDelay, humanType, humanMouseMove } = require('./browser');
+const { getBrowserContext, closeBrowser, humanDelay, humanType, humanMouseMove, isCrashError } = require('./browser');
 const { restoreSession, saveSession } = require('./browserSession');
 const { captureFailure } = require('./screenshot');
 const telegram = require('./telegram');
@@ -403,6 +403,25 @@ async function verifyTransaction(page, expectedAccount, expectedType, expectedCr
 }
 
 async function loadCredits(account, credits, parentVendor, transactionType = 'deposit', jobId = 0) {
+  // Crash recovery: AdsPower's daemon crashes ~25-75% during burst Play777
+  // launches (Cloudflare anti-bot scripts + Chromium GPU FATAL on headless
+  // VPS). Detect crash-shaped failures and retry ONCE on a fresh profile.
+  // Capped at 1 to preserve the launch rate-limit window — autoloader's
+  // outer 3-retry budget still applies.
+  const MAX_CRASH_RETRIES = 1;
+  for (let attempt = 0; attempt <= MAX_CRASH_RETRIES; attempt++) {
+    const result = await loadCreditsAttempt(account, credits, parentVendor, transactionType, jobId);
+    if (result.success || !isCrashError({ message: result.error || '' }) || attempt >= MAX_CRASH_RETRIES) {
+      return result;
+    }
+    logger.warn('Play777: AdsPower crash detected, retrying once on fresh profile', {
+      attempt: attempt + 1, error: result.error, account: account.username,
+    });
+    await new Promise((r) => setTimeout(r, 20000)); // wait for AdsPower auto-recovery
+  }
+}
+
+async function loadCreditsAttempt(account, credits, parentVendor, transactionType = 'deposit', jobId = 0) {
   let session;
 
   const doLoad = async () => {
