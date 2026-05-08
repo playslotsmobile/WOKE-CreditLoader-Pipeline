@@ -11,6 +11,7 @@ const adminRoutes = require('./routes/admin');
 const creditLineRoutes = require('./routes/creditLine');
 const { startWebhookProcessor } = require('./services/webhookProcessor');
 const { startHealthChecks } = require('./services/healthDigest');
+const { resumeOrphanedLoads } = require('./services/loadResumption');
 const { logger } = require('./services/logger');
 const { requireAdmin } = require('./middleware/auth');
 
@@ -226,6 +227,10 @@ app.listen(PORT, async () => {
   await waitForAdsPower();
   expireStaleInvoices(); // Check on startup
   setInterval(expireStaleInvoices, 60 * 60 * 1000); // Check every hour
+  // Re-queue any invoices left in LOADING state when the previous process
+  // died (deploy, OOM, crash). Without this, those invoices stay LOADING
+  // forever — silently dropped.
+  resumeOrphanedLoads().catch((err) => logger.error('Load resumption failed', { error: err.message }));
   startWebhookProcessor();
   startHealthChecks();
 });

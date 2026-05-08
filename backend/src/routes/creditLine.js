@@ -6,6 +6,7 @@ const telegram = require('../services/telegram');
 const autoloader = require('../services/autoloader');
 const { validateInvoice } = require('../services/validator');
 const { resolveTargetAccountId } = require('../services/allocationHelpers');
+const idempotency = require('../services/idempotency');
 const { logger } = require('../services/logger');
 
 // Get credit line balance for a vendor (public — used by vendor form)
@@ -35,6 +36,18 @@ router.get('/vendors/:slug/credit-line', async (req, res) => {
 router.post('/submit-credit-line', async (req, res) => {
   try {
     const { vendorSlug, baseAmount, allocations } = req.body;
+
+    const idemKey = req.get('Idempotency-Key');
+    if (idemKey) {
+      const cached = await idempotency.check(idemKey, req.body);
+      if (cached?.conflict) {
+        return res.status(409).json({ error: 'Idempotency key reused with different payload' });
+      }
+      if (cached?.hit) {
+        logger.info('Idempotency replay (submit-credit-line)', { idemKey });
+        return res.json(cached.response);
+      }
+    }
 
     const vendor = await prisma.vendor.findUnique({
       where: { slug: vendorSlug },
@@ -125,7 +138,9 @@ router.post('/submit-credit-line', async (req, res) => {
     }
 
     logger.info('Credit line draw submitted', { invoiceId: invoice.id, amount });
-    res.json({ success: true, invoiceId: invoice.id });
+    const response = { success: true, invoiceId: invoice.id };
+    if (idemKey) await idempotency.record(idemKey, req.body, response);
+    res.json(response);
 
     // Auto-load in background
     autoloader.processInvoice(invoice.id).catch((err) => {

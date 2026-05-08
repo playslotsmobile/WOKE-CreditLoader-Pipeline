@@ -131,12 +131,20 @@ async function recordRepayment(vendorId, invoiceId, amount) {
  */
 async function processRepaymentIntent(invoice) {
   try {
-    const repaymentSetting = await prisma.setting.findUnique({
-      where: { key: `credit_line_repayment_${invoice.id}` },
-    });
-    if (!repaymentSetting) return;
-    const repaymentAmount = Number(repaymentSetting.value);
-    if (repaymentAmount <= 0) return;
+    // Read intent from Invoice column (post-migration). Fall back to legacy
+    // Setting kv if column is null and Setting still exists — covers a
+    // brief window where rows pre-date the typed-column migration.
+    let repaymentAmount = invoice.creditLineRepaymentIntent != null
+      ? Number(invoice.creditLineRepaymentIntent)
+      : 0;
+
+    if (!repaymentAmount) {
+      const legacy = await prisma.setting.findUnique({
+        where: { key: `credit_line_repayment_${invoice.id}` },
+      });
+      if (legacy) repaymentAmount = Number(legacy.value);
+    }
+    if (!repaymentAmount || repaymentAmount <= 0) return;
 
     await recordRepayment(invoice.vendorId, invoice.id, repaymentAmount);
     const cl = await getCreditLine(invoice.vendorId);
@@ -147,7 +155,13 @@ async function processRepaymentIntent(invoice) {
       { usedAmount: Number(cl.usedAmount), capAmount: Number(cl.capAmount) }
     );
 
-    await prisma.setting.delete({ where: { key: `credit_line_repayment_${invoice.id}` } });
+    // Clear intent on the Invoice (idempotent for re-runs) and remove any
+    // legacy Setting row.
+    await prisma.invoice.update({
+      where: { id: invoice.id },
+      data: { creditLineRepaymentIntent: null },
+    }).catch(() => {});
+    await prisma.setting.deleteMany({ where: { key: `credit_line_repayment_${invoice.id}` } });
 
     logger.info('Credit line repayment processed', {
       invoiceId: invoice.id,

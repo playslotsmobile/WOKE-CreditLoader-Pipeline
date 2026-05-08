@@ -105,6 +105,7 @@ model Invoice {
   paidAt          DateTime?     @map("paid_at")
   loadedAt        DateTime?     @map("loaded_at")
   wireReceiptPath String?       @map("wire_receipt_path")
+  creditLineRepaymentIntent Decimal? @map("credit_line_repayment_intent") @db.Decimal(10, 2)
 
   vendor                 Vendor              @relation(fields: [vendorId], references: [id])
   allocations            InvoiceAllocation[]
@@ -170,10 +171,12 @@ model AdminUser {
 
 model ProcessedWebhook {
   id         Int      @id @default(autoincrement())
-  paymentId  String   @unique @map("payment_id")
+  paymentId  String   @map("payment_id")
   invoiceId  Int?     @map("invoice_id")
   processedAt DateTime @default(now()) @map("processed_at")
 
+  @@unique([paymentId, invoiceId], map: "processed_webhooks_payment_invoice_unique")
+  @@index([paymentId])
   @@map("processed_webhooks")
 }
 

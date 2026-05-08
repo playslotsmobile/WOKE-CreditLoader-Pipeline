@@ -8,6 +8,7 @@ const prisma = require('../db/client');
 const autoloader = require('../services/autoloader');
 const creditLineService = require('../services/creditLineService');
 const masterBalance = require('../services/masterBalance');
+const statsService = require('../services/statsService');
 const { requireAdmin, signToken } = require('../middleware/auth');
 const { logger } = require('../services/logger');
 
@@ -50,19 +51,33 @@ router.post('/login', loginLimiter, async (req, res) => {
 // All routes below require auth
 router.use(requireAdmin);
 
-// Get all invoices with allocations
+// Get invoices with allocations. Paginated: ?limit=N&before=<id> (cursor)
+// or ?status=… filter. Default limit 200 covers a few months at current rate.
+// Total count returned in X-Total-Count header so dashboard can show "M of N".
 router.get('/invoices', async (req, res) => {
   try {
-    const invoices = await prisma.invoice.findMany({
-      include: {
-        vendor: true,
-        allocations: {
-          include: { vendorAccount: true },
+    const limit = Math.max(1, Math.min(parseInt(req.query.limit, 10) || 200, 500));
+    const beforeId = req.query.before ? parseInt(req.query.before, 10) : null;
+    const status = typeof req.query.status === 'string' ? req.query.status : null;
+
+    const where = {};
+    if (beforeId) where.id = { lt: beforeId };
+    if (status) where.status = status;
+
+    const [invoices, totalCount] = await Promise.all([
+      prisma.invoice.findMany({
+        where,
+        include: {
+          vendor: true,
+          allocations: { include: { vendorAccount: true } },
+          creditLineTransactions: { select: { type: true, amount: true } },
         },
-        creditLineTransactions: { select: { type: true, amount: true } },
-      },
-      orderBy: { submittedAt: 'desc' },
-    });
+        orderBy: { id: 'desc' },
+        take: limit,
+      }),
+      prisma.invoice.count({ where: status ? { status } : {} }),
+    ]);
+    res.set('X-Total-Count', String(totalCount));
 
     const formatted = invoices.map((inv) => {
       const repaymentTxn = inv.creditLineTransactions.find((t) => t.type === 'REPAYMENT');
@@ -419,59 +434,12 @@ router.post('/2fa-code', async (req, res) => {
   }
 });
 
-// Vendor stats (real data from DB)
+// Vendor stats — moved to statsService (extracted aggregator). Keeps the
+// route thin and makes the SQL boundary easy to swap when the JS aggregation
+// hits its scaling limits.
 router.get('/vendor-stats', async (req, res) => {
   try {
-    const vendors = await prisma.vendor.findMany({
-      include: {
-        invoices: {
-          include: { allocations: true },
-        },
-      },
-    });
-
-    // Get credit line balances
-    const creditLines = await prisma.creditLine.findMany();
-    const clByVendor = Object.fromEntries(creditLines.map((cl) => [cl.vendorId, cl]));
-
-    const stats = vendors.map((v) => {
-      const paidInvoices = v.invoices.filter((i) => i.method !== 'Correction' && i.method !== 'Credit Line');
-      const creditLineInvoices = v.invoices.filter((i) => i.method === 'Credit Line');
-      const allNonCorrection = v.invoices.filter((i) => i.method !== 'Correction');
-
-      const totalRevenue = paidInvoices.reduce((s, i) => s + Number(i.baseAmount), 0);
-      const totalCreditLineDrawn = creditLineInvoices.reduce((s, i) => s + Number(i.baseAmount), 0);
-      const totalCredits = allNonCorrection.reduce(
-        (s, i) => s + i.allocations.reduce((a, al) => a + al.credits, 0),
-        0
-      );
-      const lastInvoice = v.invoices.length > 0
-        ? v.invoices.reduce((latest, i) =>
-            new Date(i.submittedAt) > new Date(latest.submittedAt) ? i : latest
-          )
-        : null;
-
-      const cl = clByVendor[v.id];
-      const creditLineOwed = cl ? Number(cl.usedAmount) : 0;
-      const creditLineCap = cl ? Number(cl.capAmount) : 0;
-
-      return {
-        slug: v.slug,
-        name: v.name,
-        business: v.businessName,
-        totalSpent: totalRevenue,
-        totalCreditLine: totalCreditLineDrawn,
-        creditLineOwed,
-        creditLineCap,
-        totalCredits,
-        invoiceCount: paidInvoices.length,
-        creditLineCount: creditLineInvoices.length,
-        lastActive: lastInvoice?.submittedAt || null,
-      };
-    })
-    .filter((v) => v.invoiceCount > 0 || v.creditLineCount > 0 || v.creditLineOwed > 0)
-    .sort((a, b) => (b.totalSpent + b.totalCreditLine) - (a.totalSpent + a.totalCreditLine));
-
+    const stats = await statsService.computeVendorLeaderboard();
     res.json(stats);
   } catch (err) {
     logger.error('Vendor stats error', { error: err });

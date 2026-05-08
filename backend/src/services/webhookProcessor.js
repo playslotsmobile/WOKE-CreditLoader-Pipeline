@@ -58,13 +58,10 @@ async function processWebhookEvent(event) {
 async function handlePayment(paymentId, log) {
   log.info('Processing payment', { paymentId });
 
-  const existing = await prisma.processedWebhook.findUnique({
-    where: { paymentId: String(paymentId) },
-  });
-  if (existing) {
-    log.info('Payment already processed — skipping', { paymentId });
-    return;
-  }
+  // Idempotency is now per (paymentId, invoiceId), not per paymentId alone.
+  // A single QB Payment can link multiple Invoices; the old "skip if any
+  // processedWebhook exists" check would silently ignore the secondary
+  // invoices on multi-invoice payments. Per-invoice de-dup happens below.
 
   let payment;
   try {
@@ -122,14 +119,31 @@ async function handlePayment(paymentId, log) {
       continue;
     }
 
+    // Per-invoice idempotency: have we already processed THIS payment for
+    // THIS invoice? If yes, skip (safe redelivery). Composite unique on
+    // (paymentId, invoiceId) enforces this.
+    const alreadyProcessed = await prisma.processedWebhook.findFirst({
+      where: { paymentId: String(paymentId), invoiceId: invoice.id },
+    });
+    if (alreadyProcessed) {
+      log.info('Payment+invoice already processed — skipping', { paymentId, invoiceId: invoice.id });
+      continue;
+    }
+
     if (invoice.status !== 'REQUESTED') {
       log.info('Invoice not in REQUESTED status — skipping', { invoiceId: invoice.id, status: invoice.status });
       continue;
     }
 
-    await prisma.processedWebhook.create({
-      data: { paymentId: String(paymentId), invoiceId: invoice.id },
-    }).catch(() => {});
+    try {
+      await prisma.processedWebhook.create({
+        data: { paymentId: String(paymentId), invoiceId: invoice.id },
+      });
+    } catch (err) {
+      // Race: another worker recorded it first. Treat as already-processed.
+      log.warn('processedWebhook create raced — skipping', { paymentId, invoiceId: invoice.id, error: err.message });
+      continue;
+    }
 
     // Credit-aware block check. Compares this invoice's actual credit
     // requirement per platform to the latest stored master balance. If any

@@ -90,6 +90,11 @@ async function reconcileQBPayments(since) {
   try {
     const quickbooks = require('./quickbooks');
     const sinceStr = since.toISOString().split('T')[0];
+    // Date string from toISOString().split('T')[0] is always YYYY-MM-DD; assert
+    // shape as defense-in-depth in case the input source ever changes.
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(sinceStr)) {
+      throw new Error(`reconcileQBPayments: invalid date string ${sinceStr}`);
+    }
     const data = await quickbooks.qbRequest(
       'GET',
       `query?query=SELECT * FROM Payment WHERE TxnDate >= '${sinceStr}'`

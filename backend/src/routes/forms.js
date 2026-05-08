@@ -11,6 +11,7 @@ const { validateInvoice, validateCorrection } = require('../services/validator')
 const prisma = require('../db/client');
 const creditLineService = require('../services/creditLineService');
 const { resolveTargetAccountId } = require('../services/allocationHelpers');
+const idempotency = require('../services/idempotency');
 const { logger } = require('../services/logger');
 
 const uploadsDir = path.join(__dirname, '..', '..', 'uploads');
@@ -44,6 +45,21 @@ router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) =>
     }
     const { vendorSlug, method, baseAmount, feeAmount, totalAmount, allocations } = body;
     const clRepayment = body.creditLineRepayment ? Number(body.creditLineRepayment) : 0;
+
+    // Idempotency: if the client provides an Idempotency-Key header (e.g., on
+    // double-submit retry), replay the previous response instead of creating
+    // a second invoice + QB doc + credit-line draw.
+    const idemKey = req.get('Idempotency-Key');
+    if (idemKey) {
+      const cached = await idempotency.check(idemKey, body);
+      if (cached?.conflict) {
+        return res.status(409).json({ error: 'Idempotency key reused with different payload' });
+      }
+      if (cached?.hit) {
+        logger.info('Idempotency replay (submit-invoice)', { idemKey });
+        return res.json(cached.response);
+      }
+    }
 
     const vendor = await prisma.vendor.findUnique({
       where: { slug: vendorSlug },
@@ -88,7 +104,9 @@ router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) =>
       }
     }
 
-    // Create invoice in DB
+    // Create invoice in DB. Repayment intent stored as a typed column on the
+    // Invoice itself instead of a Setting kv (used to be keyed
+    // credit_line_repayment_<id> — moved to the column for type safety + atomicity).
     const invoice = await prisma.invoice.create({
       data: {
         vendorId: vendor.id,
@@ -98,6 +116,7 @@ router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) =>
         totalAmount,
         status: isOffline ? 'PENDING' : 'REQUESTED',
         wireReceiptPath: req.file ? req.file.filename : null,
+        creditLineRepaymentIntent: clRepayment > 0 ? clRepayment : null,
       },
     });
 
@@ -127,14 +146,8 @@ router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) =>
       });
     }
 
-    // Store credit line repayment intent if present
-    if (clRepayment > 0) {
-      await prisma.setting.upsert({
-        where: { key: `credit_line_repayment_${invoice.id}` },
-        update: { value: String(clRepayment) },
-        create: { key: `credit_line_repayment_${invoice.id}`, value: String(clRepayment) },
-      });
-    }
+    // (Repayment intent now lives on the Invoice row above — no separate
+    // Setting write needed.)
 
     // Format vendor for telegram
     const vendorData = {
@@ -202,7 +215,9 @@ router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) =>
     }
 
     logger.info('Invoice saved', { invoiceId: invoice.id });
-    res.json({ success: true, invoiceId: invoice.id, qbInvoiceId: invoiceData.qbInvoiceId });
+    const response = { success: true, invoiceId: invoice.id, qbInvoiceId: invoiceData.qbInvoiceId };
+    if (idemKey) await idempotency.record(idemKey, body, response);
+    res.json(response);
   } catch (err) {
     logger.error('Submit invoice error', { error: err });
     res.status(500).json({ error: 'Failed to submit invoice' });
