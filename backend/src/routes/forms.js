@@ -8,7 +8,6 @@ const quickbooks = require('../services/quickbooks');
 const telegram = require('../services/telegram');
 const autoloader = require('../services/autoloader');
 const { validateInvoice, validateCorrection } = require('../services/validator');
-const { CASH_ALLOWED_SLUGS } = require('../constants/cash');
 const prisma = require('../db/client');
 const creditLineService = require('../services/creditLineService');
 const { resolveTargetAccountId } = require('../services/allocationHelpers');
@@ -52,7 +51,7 @@ router.post('/submit-invoice', upload.single('wireReceipt'), async (req, res) =>
     });
     if (!vendor) return res.status(404).json({ error: 'Vendor not found' });
 
-    if (method === 'Cash' && !CASH_ALLOWED_SLUGS.includes(vendor.slug)) {
+    if (method === 'Cash' && !vendor.cashAllowed) {
       return res.status(403).json({ error: 'Cash not enabled for this vendor' });
     }
 

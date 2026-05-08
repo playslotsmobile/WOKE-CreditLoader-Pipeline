@@ -87,6 +87,7 @@ async function loadCredits(account, credits, jobId = 0) {
     }
 
     const [, agentId, login, parentId, balance] = match;
+    const balanceBefore = parseFloat(balance);
     logger.info('IConnect: Agent found', { login, agentId, balance });
 
     await humanMouseMove(page);
@@ -121,6 +122,37 @@ async function loadCredits(account, credits, jobId = 0) {
     if (page.url().includes('/agent/show')) {
       logger.info('IConnect: Successfully loaded credits', { credits, username: account.username });
 
+      // Verify the deposit by re-reading the agent's button balance.
+      // /agent/show after deposit re-renders the row; the button's onclick
+      // contains the new balance. Match credits-applied to ledger to catch
+      // silent failures (deposit rejected but page still navigated).
+      let verified = false;
+      let balanceAfter = null;
+      try {
+        await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+        const verifyBtn = page.locator(`button[onclick*="'${account.username}'"]`);
+        const verifyCount = await verifyBtn.count();
+        if (verifyCount > 0) {
+          const onclick2 = await verifyBtn.first().getAttribute('onclick');
+          const m2 = onclick2.match(/initDepositModal\(\s*'(\d+)',\s*'([^']+)',\s*'(\d+)',\s*'([^']+)'/);
+          if (m2) {
+            balanceAfter = parseFloat(m2[4]);
+            const expected = balanceBefore + Number(credits);
+            // Tolerance ±0.5 — iConnect sometimes shows running balance with
+            // bonuses applied. We just want to know the deposit hit.
+            if (Math.abs(balanceAfter - expected) <= 0.5) {
+              verified = true;
+            } else {
+              logger.warn('IConnect verification mismatch', {
+                username: account.username, balanceBefore, balanceAfter, credits, expected,
+              });
+            }
+          }
+        }
+      } catch (verifyErr) {
+        logger.warn('IConnect verify step threw — proceeding without verification', { error: verifyErr.message });
+      }
+
       // Opportunistic master balance capture — the /agent/show page has
       // "Your balance: NNN usd" in the top banner. Read it while we're here.
       try {
@@ -133,7 +165,15 @@ async function loadCredits(account, credits, jobId = 0) {
       }
 
       await saveSession(context, 'iconnect');
-      return { success: true, platform: 'ICONNECT', account: account.username, credits };
+      return {
+        success: true,
+        platform: 'ICONNECT',
+        account: account.username,
+        credits,
+        verified,
+        balanceBefore,
+        balanceAfter,
+      };
     } else {
       await captureFailure(page, jobId, 'ICONNECT_DEPOSIT_FAILED');
       throw new Error('Page did not return to /agent/show after deposit');

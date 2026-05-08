@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env'), override: true });
 
@@ -17,7 +18,31 @@ const app = express();
 // Behind nginx/Cloudflare — trust the first proxy hop so X-Forwarded-For works.
 // Required for express-rate-limit to bucket per real client IP, not per proxy.
 app.set('trust proxy', 1);
-app.use(cors());
+
+// Security headers. CSP is permissive on script-src because the SPA bundle is
+// served from same-origin and inlines a tiny bootstrap. Tighten if/when we
+// move to nonce-based CSP.
+app.use(helmet({
+  contentSecurityPolicy: false, // SPA + inline styles from Tailwind would need a custom policy
+  crossOriginEmbedderPolicy: false, // would block our own /api/uploads images otherwise
+}));
+
+// CORS: in prod the SPA is same-origin (served by this backend), so CORS is
+// only needed for dev. Lock to known origins; reject everything else with the
+// implicit no-CORS-headers response (browsers will block).
+const ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS || 'https://load.wokeavr.com,http://localhost:5173,http://localhost:3000')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+app.use(cors({
+  origin: (origin, cb) => {
+    // No origin = same-origin or curl/healthcheck — allow.
+    if (!origin) return cb(null, true);
+    if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    return cb(new Error(`CORS blocked: ${origin}`));
+  },
+  credentials: false,
+}));
 app.use(express.json({
   verify: (req, res, buf) => {
     // Preserve raw body for QB webhook HMAC verification
@@ -48,6 +73,7 @@ app.get('/api/vendors/:slug', async (req, res) => {
       email: vendor.email,
       qbCustomerName: vendor.qbCustomerId,
       telegramChatId: vendor.telegramChatId,
+      cashAllowed: vendor.cashAllowed,
       accounts: vendor.accounts.map((a) => ({
         id: a.id,
         platform: a.platform,

@@ -16,8 +16,6 @@ const METHOD_CONFIG = {
   Cash: { min: 1000, max: 20000, step: 250 },
 };
 
-const CASH_ALLOWED_SLUGS = ['alex', 'claudia'];
-
 function buildOptions(min, max, step) {
   const opts = [];
   for (let v = min; v <= max; v += step) opts.push(v);
@@ -140,7 +138,7 @@ export default function VendorForm() {
   const isWire = method === 'Wire';
   const isCash = method === 'Cash';
   const isOffline = isWire || isCash;
-  const cashAllowed = CASH_ALLOWED_SLUGS.includes(vendorSlug);
+  const cashAllowed = !!vendor?.cashAllowed;
 
   const dropdownOptions = useMemo(() => {
     if (!config) return [];

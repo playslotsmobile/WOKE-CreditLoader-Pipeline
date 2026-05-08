@@ -15,6 +15,7 @@ model Vendor {
   email          String
   qbCustomerId   String    @map("qb_customer_id")
   telegramChatId String?   @map("telegram_chat_id")
+  cashAllowed    Boolean   @default(false) @map("cash_allowed")
   createdAt      DateTime  @default(now()) @map("created_at")
 
   accounts VendorAccount[]

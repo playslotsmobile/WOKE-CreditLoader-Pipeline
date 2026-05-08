@@ -403,20 +403,31 @@ async function getRecentHistory(platform, hours = 24) {
 // records it, and fires auto-resume if applicable. Sequential (not parallel)
 // to respect the Play777 rate limit and avoid AdsPower profile contention with
 // a concurrent autoload.
+// Retry wrapper for sweeps. AdsPower CDP drops mid-flow have ~30% per-attempt
+// failure rate observed in live testing; without retry, a transient blip means
+// stale balance data for the full 2h until the next scheduled sweep, which
+// breaks BLOCKED_LOW_MASTER gating. Two attempts with a 30s backoff covers
+// the typical drop without busting the Play777 portal rate-limit window.
+async function withSweepRetry(name, fn) {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const result = await fn();
+      if (result != null) return result;
+      logger.warn(`${name} sweep returned null`, { attempt });
+    } catch (err) {
+      logger.error(`${name} sweep failed`, { attempt, error: err.message });
+    }
+    if (attempt === 1) {
+      await new Promise((r) => setTimeout(r, 30000));
+    }
+  }
+  return null;
+}
+
 async function runScheduledSweep() {
   const results = { play777: null, iconnect: null };
-
-  try {
-    results.play777 = await sweepPlay777();
-  } catch (err) {
-    logger.error('Play777 sweep failed', { error: err.message });
-  }
-
-  try {
-    results.iconnect = await sweepIconnect();
-  } catch (err) {
-    logger.error('iConnect sweep failed', { error: err.message });
-  }
+  results.play777 = await withSweepRetry('Play777', sweepPlay777);
+  results.iconnect = await withSweepRetry('iConnect', sweepIconnect);
 
   // Auto-resume check happens after both sweeps so blocked invoices with
   // allocations on both platforms can resume in one pass.
