@@ -243,7 +243,13 @@ async function processInvoiceInternal(invoiceId, retryCount = 0) {
         credits: job.creditsAmount,
       });
 
-      const result = await executeLoad(job, 'PLAY777', account, job.creditsAmount);
+      let parentVendor = null;
+      if (account.loadType === 'operator' && account.parentVendorAccId) {
+        const parentAcc = await prisma.vendorAccount.findUnique({ where: { id: account.parentVendorAccId } });
+        if (parentAcc) parentVendor = { username: parentAcc.username, operatorId: parentAcc.operatorId };
+      }
+
+      const result = await executeLoad(job, 'PLAY777', account, job.creditsAmount, parentVendor);
       results.push(result);
 
       // Handle chain loads
