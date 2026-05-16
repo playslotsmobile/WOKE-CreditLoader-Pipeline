@@ -64,9 +64,10 @@ async function readPlay777FromMyBalance(page) {
 // session to piggyback on.
 async function readPlay777FromDashboard(page) {
   try {
+    // 90s timeout for CF challenge headroom (matches play777.js convention).
     await page.goto('https://pna.play777games.com/dashboard', {
       waitUntil: 'domcontentloaded',
-      timeout: 60000,
+      timeout: 90000,
     });
     // The SPA hydrates the balance well after DOMContentLoaded. Wait for
     // network idle so the API call that populates the balance has a chance
@@ -105,12 +106,13 @@ async function readPlay777FromDashboard(page) {
     try {
       if (attempt === 0) {
         // Renamed from /history/my-balance to /history/balance on/around 2026-05.
+        // 90s timeout for CF JS challenge headroom.
         await page.goto('https://pna.play777games.com/history/balance', {
           waitUntil: 'domcontentloaded',
-          timeout: 60000,
+          timeout: 90000,
         });
       } else {
-        await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+        await page.reload({ waitUntil: 'domcontentloaded', timeout: 90000 });
       }
       try {
         await page.waitForLoadState('networkidle', { timeout: 15000 });

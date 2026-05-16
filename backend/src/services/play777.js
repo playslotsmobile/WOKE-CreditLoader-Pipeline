@@ -1,4 +1,4 @@
-const { getBrowserContext, closeBrowser, humanDelay, humanType, humanMouseMove, isCrashError } = require('./browser');
+const { getBrowserContext, closeBrowser, humanDelay, humanType, humanMouseMove, humanDwell, pruneStaleTabs, isCrashError } = require('./browser');
 const { restoreSession, saveSession } = require('./browserSession');
 const { captureFailure } = require('./screenshot');
 const telegram = require('./telegram');
@@ -18,7 +18,10 @@ const LOAD_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes — includes verification st
 const TFA_TIMEOUT_MS = 5 * 60 * 1000;
 
 async function ensureLoggedIn(page) {
-  await page.goto(DASHBOARD_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  // 90s timeout (was 60s): when CF serves a JS challenge to a fresh
+  // session, the browser can take 10-30s to solve before DCL fires.
+  // 60s was just-too-tight, especially when proxy adds latency.
+  await page.goto(DASHBOARD_URL, { waitUntil: 'domcontentloaded', timeout: 90000 });
   await humanDelay(2000, 4000);
 
   if (!page.url().includes('/login')) {
@@ -222,20 +225,22 @@ async function dismissStuckModal(page, jobId = 0) {
 
 async function navigateToVendorsAndWait(page, jobId = 0) {
   for (let attempt = 0; attempt < 2; attempt++) {
-    await page.goto(VENDORS_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    // 90s navigation timeout to give CF JS challenge time to solve.
+    await page.goto(VENDORS_URL, { waitUntil: 'domcontentloaded', timeout: 90000 });
     await page.setViewportSize({ width: 1920, height: 1080 });
     await humanDelay(5000, 8000);
 
     await dismissStuckModal(page, jobId);
 
     try {
+      // Table selector wait stays at 60s — this is HTML hydration, not network.
       await page.locator('table tbody tr').first().waitFor({ state: 'attached', timeout: 60000 });
       await humanDelay(2000, 3000);
       return; // Table loaded successfully
     } catch {
       if (attempt === 0) {
         logger.warn('Vendors table did not load — reloading page', { jobId, attempt });
-        await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+        await page.reload({ waitUntil: 'domcontentloaded', timeout: 90000 });
         await humanDelay(8000, 12000);
       } else {
         await captureFailure(page, jobId, 'VENDORS_TABLE_EMPTY');
@@ -314,7 +319,8 @@ async function loadOperator(page, vendor, operator, credits, transactionType = '
 // Verify a transaction by checking My Balance page
 async function verifyTransaction(page, expectedAccount, expectedType, expectedCredits, jobId = 0) {
   try {
-    await page.goto(MY_BALANCE_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    // 90s navigation timeout — CF can re-challenge mid-session on this URL too.
+    await page.goto(MY_BALANCE_URL, { waitUntil: 'domcontentloaded', timeout: 90000 });
     try {
       await page.waitForLoadState('networkidle', { timeout: 15000 });
     } catch {}
@@ -434,6 +440,12 @@ async function loadCreditsAttempt(account, credits, parentVendor, transactionTyp
 
     await restoreSession(context, 'play777');
 
+    // Close any stale tabs left over from prior launches. AdsPower
+    // profiles persist tabs across runs and the accumulating pile (often
+    // 30+ Play777 dashboards) is itself a bot-fingerprint signal to CF
+    // beyond just being a memory leak. Best-effort, never fatal.
+    await pruneStaleTabs(context).catch(() => {});
+
     // Reuse existing page or create new one (avoids tab buildup)
     const existingPages = context.pages();
     const page = existingPages.length > 0 ? existingPages[0] : await context.newPage();
@@ -443,6 +455,12 @@ async function loadCreditsAttempt(account, credits, parentVendor, transactionTyp
     if (!loggedIn) throw new Error('Failed to login to Play777');
 
     await saveSession(context, 'play777');
+
+    // Human-cadence dwell on /dashboard before navigating elsewhere.
+    // CF's behavioral WAF treats rapid post-login navigation as bot-like;
+    // 8-15s of mouse/scroll activity here significantly lowers friction
+    // on the subsequent /vendors-overview and /history/balance gotos.
+    await humanDwell(page).catch(() => {});
 
     if (parentVendor) {
       await loadOperator(page, parentVendor, account, credits, transactionType, jobId);

@@ -266,12 +266,75 @@ async function withBrowserRecovery(platform, fn) {
   }
 }
 
+/**
+ * Close all pages in the context except the first one. AdsPower profiles
+ * persist tabs across launches; without periodic pruning a long-running
+ * profile accumulates dozens of stale tabs from prior runs. Beyond memory
+ * waste, a 30+ tab pile pointing at the same automated origin is a strong
+ * bot-fingerprint signal to Cloudflare's behavioral models — observed on
+ * 2026-05-16 contributing to mid-session "Sorry, you have been blocked"
+ * pages even on a clean residential IP.
+ *
+ * Best-effort: a stuck page that won't close is logged but does not throw.
+ * Returns the count of pages closed.
+ */
+async function pruneStaleTabs(context) {
+  const pages = context.pages();
+  if (pages.length <= 1) return 0;
+  let closed = 0;
+  for (let i = 1; i < pages.length; i++) {
+    try {
+      await pages[i].close({ runBeforeUnload: false });
+      closed++;
+    } catch (err) {
+      // Stuck tabs aren't worth failing the load over.
+      logger.warn('pruneStaleTabs: failed to close a stale tab', { index: i, error: err.message });
+    }
+  }
+  if (closed > 0) {
+    logger.info('Pruned stale tabs', { closed, remaining: 1 });
+  }
+  return closed;
+}
+
+/**
+ * Sit on the current page for a randomized interval, simulating human
+ * "looking at the page" behavior: tiny mouse movements + a small scroll.
+ * Cloudflare's behavioral WAF rewards this kind of pre-navigation idle
+ * with a lower friction score on subsequent gotos in the same session.
+ *
+ * Default range tuned to 8-15s based on observed CF challenge cadence
+ * (long enough to be classified as a human reading the page, short enough
+ * that total load latency stays acceptable).
+ */
+async function humanDwell(page, minMs = 8000, maxMs = 15000) {
+  const total = Math.floor(Math.random() * (maxMs - minMs) + minMs);
+  const endAt = Date.now() + total;
+  while (Date.now() < endAt) {
+    try {
+      const x = 200 + Math.floor(Math.random() * 800);
+      const y = 200 + Math.floor(Math.random() * 400);
+      await page.mouse.move(x, y, { steps: 3 + Math.floor(Math.random() * 5) });
+      if (Math.random() < 0.4) {
+        const dy = Math.floor(Math.random() * 160) - 40;
+        await page.mouse.wheel(0, dy);
+      }
+    } catch {
+      // Page may be navigating; that's fine, just exit early.
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 1200 + Math.floor(Math.random() * 1800)));
+  }
+}
+
 module.exports = {
   getBrowserContext,
   closeBrowser,
   humanDelay,
   humanType,
   humanMouseMove,
+  humanDwell,
+  pruneStaleTabs,
   checkAdsPowerHealth,
   isCrashError,
   withBrowserRecovery,
