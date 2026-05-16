@@ -113,6 +113,23 @@ async function processInvoiceInternal(invoiceId, retryCount = 0) {
 
   const isCorrection = invoice.method === 'Correction';
 
+  // Retry-of-FAILED entry: when we re-enter on an invoice that previously
+  // ended in FAILED (manual admin retry or trigger-load), the only LoadJob
+  // rows are stuck in FAILED status. Reset them to PENDING so this attempt
+  // actually re-tries them. Otherwise the pendingJobs query below returns
+  // [] and the "all already completed" branch would falsely flip the
+  // invoice to LOADED with nothing actually loaded on the platform —
+  // same bug shape as invoice 347 (2026-05-15).
+  if (invoice.status === 'FAILED') {
+    const reset = await prisma.loadJob.updateMany({
+      where: { invoiceId, status: 'FAILED' },
+      data: { status: 'PENDING', errorMessage: null },
+    });
+    if (reset.count > 0) {
+      logger.info('Reset FAILED loadJobs to PENDING for retry', { invoiceId, count: reset.count });
+    }
+  }
+
   // Update status to LOADING
   await prisma.invoice.update({
     where: { id: invoiceId },
@@ -129,13 +146,30 @@ async function processInvoiceInternal(invoiceId, retryCount = 0) {
   });
 
   if (pendingJobs.length === 0) {
-    // All jobs already succeeded (edge case)
+    // Defensive: only mark LOADED if at least one job actually succeeded
+    // AND no jobs are in FAILED state. The bug we're guarding against:
+    // an invoice with ALL FAILED jobs (no PENDING) would otherwise fall
+    // into the "all done" branch and get marked LOADED without anything
+    // actually loaded. Surfaced 2026-05-16 on smoke test of invoice 365.
+    const successCount = await prisma.loadJob.count({ where: { invoiceId, status: 'SUCCESS' } });
+    const failedCount = await prisma.loadJob.count({ where: { invoiceId, status: 'FAILED' } });
+    if (successCount > 0 && failedCount === 0) {
+      await prisma.invoice.update({
+        where: { id: invoiceId },
+        data: { status: 'LOADED', loadedAt: new Date() },
+      });
+      logger.info('All loads already completed', { invoiceId });
+      return { invoiceId, results: [], allSuccess: true };
+    }
+    // No PENDING + some/all FAILED → invoice belongs in FAILED, not LOADED.
     await prisma.invoice.update({
       where: { id: invoiceId },
-      data: { status: 'LOADED', loadedAt: new Date() },
+      data: { status: 'FAILED' },
     });
-    logger.info('All loads already completed', { invoiceId });
-    return { invoiceId, results: [], allSuccess: true };
+    logger.warn('No PENDING jobs and not all SUCCESS — invoice stays FAILED', {
+      invoiceId, successCount, failedCount,
+    });
+    return { invoiceId, results: [], allSuccess: false };
   }
 
   for (const job of pendingJobs) {
