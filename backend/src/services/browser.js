@@ -124,6 +124,65 @@ async function restartAdsPower() {
   });
 }
 
+/**
+ * Rotate the DataImpulse residential proxy session ID on the AdsPower
+ * profile before launch. Each load run gets a fresh, sticky residential
+ * exit IP that lasts the duration of the AdsPower session — so a single
+ * load (with Step 1 + Step 2 + verification) sees one consistent IP, but
+ * the next load attempt rolls a fresh one and doesn't carry over any
+ * accumulated CF WAF flags from the previous run.
+ *
+ * No-op if DATAIMPULSE_USER / DATAIMPULSE_PASS env vars aren't set, or
+ * if the AdsPower profile isn't configured for DataImpulse to begin with.
+ * Failures are logged but never thrown — a stale proxy config is better
+ * than a failed load.
+ *
+ * Currently only applied to play777 (the only CF-fronted platform).
+ */
+async function rotateStickyProxySession(platform, profileId) {
+  if (platform !== 'play777') return;
+  const diUser = process.env.DATAIMPULSE_USER;
+  const diPass = process.env.DATAIMPULSE_PASS;
+  if (!diUser || !diPass) {
+    logger.warn('rotateStickyProxySession: DATAIMPULSE_USER/PASS not set, skipping rotation', { platform });
+    return;
+  }
+  // Sticky session ID: random 10-digit number. DataImpulse keeps the
+  // same exit IP for the lifetime of the session (typically ~10 min idle
+  // timeout), which is the natural unit of "one load run."
+  const sid = Math.floor(Math.random() * 1e10).toString().padStart(10, '0');
+  const proxyUser = `${diUser}__cr.us-sid-${sid}`;
+  try {
+    const res = await fetch(`${ADSPOWER_API}/api/v1/user/update`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${ADSPOWER_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        user_id: profileId,
+        user_proxy_config: {
+          proxy_soft: 'other',
+          proxy_type: 'http',
+          proxy_host: 'gw.dataimpulse.com',
+          proxy_port: '823',
+          proxy_user: proxyUser,
+          proxy_password: diPass,
+        },
+      }),
+      signal: AbortSignal.timeout(5000),
+    });
+    const data = await res.json();
+    if (data.code !== 0) {
+      logger.warn('rotateStickyProxySession: AdsPower update returned non-zero', { platform, msg: data.msg, sid });
+      return;
+    }
+    logger.info('Rotated sticky DataImpulse session', { platform, sid });
+  } catch (err) {
+    logger.warn('rotateStickyProxySession failed — proceeding with prior proxy config', { platform, error: err.message });
+  }
+}
+
 // Launch an AdsPower profile with auto-recovery
 async function getBrowserContext(platform) {
   const profileId = PROFILE_IDS[platform];
@@ -134,6 +193,10 @@ async function getBrowserContext(platform) {
   checkRateLimit(platform);
   await enforceInterlaunchCooldown(platform);
   lastLaunchAt[platform] = Date.now();
+
+  // Rotate residential proxy session before launch (play777 only).
+  // Best-effort: failures don't block the load.
+  await rotateStickyProxySession(platform, profileId);
 
   // Health check — try to recover if AdsPower is down
   let healthy = await checkAdsPowerHealth();
