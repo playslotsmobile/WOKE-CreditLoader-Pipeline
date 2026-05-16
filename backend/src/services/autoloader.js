@@ -187,79 +187,128 @@ async function processInvoiceInternal(invoiceId, retryCount = 0) {
     });
 
     if (priorDeductOk) {
-      logger.warn('Correction Step 1 already completed on prior attempt — skipping deduct', {
+      logger.warn('Correction Step 1 already completed on prior attempt — runCorrection will skip deduct', {
         invoiceId,
         credits: totalCorrectionCredits,
         sourceAccount: source.username,
         priorEventId: priorDeductOk.id,
         priorEventAt: priorDeductOk.createdAt,
       });
-    } else {
-      // Step 1: Correct (deduct) total credits from source account
-      logger.info('Correction Step 1: Deducting credits from source account', {
-        credits: totalCorrectionCredits,
+    }
+
+    // Single-session refactor: deduct + all deposits in ONE AdsPower
+    // profile launch. Halves rate-limit-slot usage per correction,
+    // eliminates the cf_clearance cold start between Step 1 and Step 2,
+    // and meaningfully shrinks the partial-success window.
+    logger.info('Running correction in single AdsPower session', {
+      invoiceId,
+      skipDeduct: !!priorDeductOk,
+      sourceAccount: source.username,
+      totalCorrectionCredits,
+      targetCount: pendingJobs.length,
+    });
+
+    let correctionResult;
+    if (DRY_RUN) {
+      logger.info('[DRY RUN] Would runCorrection', {
         sourceAccount: source.username,
-        operatorId: source.operatorId,
+        totalCorrectionCredits,
+        targets: pendingJobs.map((j) => j.vendorAccount.username),
       });
+      correctionResult = {
+        deduct: { ran: !priorDeductOk, success: true, verified: false, credits: totalCorrectionCredits },
+        deposits: pendingJobs.map((j) => ({
+          jobId: j.id, account: j.vendorAccount.username, credits: j.creditsAmount,
+          success: true, verified: false,
+        })),
+      };
+    } else {
+      correctionResult = await play777.runCorrection(
+        { username: source.username, operatorId: source.operatorId },
+        pendingJobs.map((j) => ({
+          account: { username: j.vendorAccount.username, operatorId: j.vendorAccount.operatorId },
+          credits: j.creditsAmount,
+          jobId: j.id,
+        })),
+        pendingJobs[0].id,
+        { skipDeduct: !!priorDeductOk }
+      );
+    }
 
-      let deductResult;
-      if (DRY_RUN) {
-        logger.info('[DRY RUN] Would correct credits from source account', {
-          credits: totalCorrectionCredits,
+    // Deduct outcome (only relevant if we actually ran Step 1 this attempt)
+    if (correctionResult.deduct.ran) {
+      if (correctionResult.deduct.success) {
+        logger.info('Correction Step 1 complete: credits deducted', {
+          credits: correctionResult.deduct.credits,
           sourceAccount: source.username,
+          verified: correctionResult.deduct.verified,
         });
-        deductResult = { success: true };
+        await emitEvent(pendingJobs[0].id, 'CORRECTION_DEDUCT_OK', 'SUCCESS', {
+          sourceAccount: source.username,
+          credits: correctionResult.deduct.credits,
+          verified: correctionResult.deduct.verified,
+          transactionId: correctionResult.deduct.transactionId,
+        });
       } else {
-        deductResult = await play777.loadCredits(
-          { username: source.username, operatorId: source.operatorId },
-          totalCorrectionCredits,
-          null,
-          'correction',
-          pendingJobs[0].id
-        );
-      }
-
-      if (!deductResult.success) {
         logger.error('Correction failed: Could not deduct from source account', {
           sourceAccount: source.username,
-          error: deductResult.error,
+          error: correctionResult.deduct.error,
         });
         await emitEvent(pendingJobs[0].id, 'CORRECTION_DEDUCT_FAILED', 'FAILED', {
           sourceAccount: source.username,
-          credits: totalCorrectionCredits,
-          error: deductResult.error,
+          credits: correctionResult.deduct.credits,
+          error: correctionResult.deduct.error,
         });
-        await markAllJobsFailed(pendingJobs, `Failed to deduct from ${source.username}: ${deductResult.error}`);
+        await markAllJobsFailed(pendingJobs, `Failed to deduct from ${source.username}: ${correctionResult.deduct.error}`);
         await prisma.invoice.update({ where: { id: invoiceId }, data: { status: 'FAILED' } });
-        return { invoiceId, results: [deductResult], allSuccess: false };
+        return { invoiceId, results: [{ success: false, error: correctionResult.deduct.error }], allSuccess: false };
       }
-
-      logger.info('Correction Step 1 complete: credits deducted', {
-        credits: totalCorrectionCredits,
-        sourceAccount: source.username,
-      });
-      await emitEvent(pendingJobs[0].id, 'CORRECTION_DEDUCT_OK', 'SUCCESS', {
-        sourceAccount: source.username,
-        credits: totalCorrectionCredits,
-      });
     }
-    await new Promise((r) => setTimeout(r, 3000 + Math.random() * 5000));
 
-    // Step 2: Deposit credits to each target vendor
-    for (const job of pendingJobs) {
-      const account = job.vendorAccount;
-      logger.info('Correction Step 2: Depositing credits to target account', {
-        credits: job.creditsAmount,
-        account: account.username,
-        operatorId: account.operatorId,
+    // Step 2 outcomes — apply per-job LoadJob updates + LOAD_OK/LOAD_FAILED
+    // events that mirror what executeLoad would have done in the old per-call
+    // path. Push into `results` so the outer retry/finalize logic sees them.
+    for (const dep of correctionResult.deposits) {
+      const job = pendingJobs.find((j) => j.id === dep.jobId);
+      if (!job) continue;
+
+      await prisma.loadJob.update({
+        where: { id: job.id },
+        data: {
+          status: dep.success ? 'SUCCESS' : 'FAILED',
+          attempts: { increment: 1 },
+          errorMessage: dep.success
+            ? null
+            : (dep.error || '[bug] PLAY777 runCorrection deposit returned success=false with empty .error'),
+          completedAt: dep.success ? new Date() : null,
+        },
       });
 
-      const result = await executeLoad(job, 'PLAY777', account, job.creditsAmount);
-      results.push(result);
+      await emitEvent(job.id, dep.success ? 'LOAD_OK' : 'LOAD_FAILED', dep.success ? 'SUCCESS' : 'FAILED', {
+        platform: 'PLAY777',
+        account: dep.account,
+        credits: dep.credits,
+        error: dep.error || null,
+      });
 
-      if (pendingJobs.length > 1) {
-        await new Promise((r) => setTimeout(r, 3000 + Math.random() * 5000));
+      if (dep.success && dep.verified !== undefined) {
+        await emitEvent(job.id, dep.verified ? 'VERIFIED' : 'UNVERIFIED', dep.verified ? 'SUCCESS' : 'INFO', {
+          platform: 'PLAY777',
+          account: dep.account,
+          transactionId: dep.transactionId || null,
+          verified: dep.verified,
+        });
       }
+
+      results.push({
+        success: dep.success,
+        platform: 'PLAY777',
+        account: dep.account,
+        credits: dep.credits,
+        verified: dep.verified,
+        transactionId: dep.transactionId,
+        error: dep.error,
+      });
     }
   } else {
     // Regular invoice — split by platform

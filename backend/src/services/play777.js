@@ -502,4 +502,138 @@ async function loadCreditsAttempt(account, credits, parentVendor, transactionTyp
   }
 }
 
-module.exports = { loadCredits, ensureLoggedIn, verifyTransaction };
+/**
+ * Run a Play777 correction (deduct + deposits) inside ONE AdsPower
+ * profile launch instead of N separate launches.
+ *
+ * Why this matters:
+ *   - Each profile launch burns a rate-limit slot (3 per 10 min). A
+ *     1-deduct-1-deposit correction used to cost 2 slots; this costs 1.
+ *   - Each launch is a new CF behavioral evaluation. Staying in one
+ *     session keeps cf_clearance cached and significantly reduces the
+ *     mid-flow "Sorry, you have been blocked" rate.
+ *   - The previous flow had a partial-success window: Step 1 succeeded
+ *     on Play777 but Step 2 failed before any DB update. The
+ *     correction-idempotency guard in autoloader (c377a3f) is insurance
+ *     for that case; single-session is the structural fix that makes
+ *     the partial-success window much smaller.
+ *
+ * Args:
+ *   source: { username, operatorId }       — the "vendor"-type account
+ *                                            (CR1234 typically). Step 1
+ *                                            deducts totalCredits from here.
+ *   targets: [{ account: { username, operatorId },
+ *               credits,
+ *               jobId }]                   — Step 2 targets. Each gets
+ *                                            an independent deposit.
+ *   primaryJobId                            — for logging/screenshot tagging
+ *                                            on the deduct step
+ *   options.skipDeduct: boolean             — when the idempotency guard
+ *                                            in autoloader determines a
+ *                                            prior attempt already deducted,
+ *                                            skip Step 1 and only run Step 2
+ *                                            (still single-session).
+ *
+ * Returns:
+ *   {
+ *     deduct: { ran, success, verified, transactionId, credits, error? },
+ *     deposits: [{ jobId, account, credits, success, verified, transactionId, error? }],
+ *   }
+ *
+ * Partial failure is normal — caller (autoloader) decides per-job pass/fail.
+ * A deduct failure short-circuits deposits (we don't want to deposit
+ * without a confirmed deduct).
+ */
+const CORRECTION_TIMEOUT_MS = 10 * 60 * 1000; // 10 min — multi-step flow needs headroom
+
+async function runCorrection(source, targets, primaryJobId = 0, options = {}) {
+  const skipDeduct = !!options.skipDeduct;
+  const totalDeductCredits = targets.reduce((s, t) => s + t.credits, 0);
+  let session;
+
+  const doRun = async () => {
+    session = await getBrowserContext('play777');
+    const context = session.context;
+    await restoreSession(context, 'play777');
+    await pruneStaleTabs(context).catch(() => {});
+
+    const existingPages = context.pages();
+    const page = existingPages.length > 0 ? existingPages[0] : await context.newPage();
+    await page.setViewportSize({ width: 1920, height: 1080 });
+
+    const loggedIn = await ensureLoggedIn(page);
+    if (!loggedIn) throw new Error('Failed to login to Play777');
+    await saveSession(context, 'play777');
+    await humanDwell(page).catch(() => {});
+
+    const result = {
+      deduct: { ran: false, success: false, verified: false, transactionId: null, credits: totalDeductCredits },
+      deposits: [],
+    };
+
+    // STEP 1: deduct totalDeductCredits from the source account.
+    // Skipped when the autoloader's idempotency guard determines a prior
+    // attempt already succeeded on this leg.
+    if (!skipDeduct) {
+      result.deduct.ran = true;
+      try {
+        await loadVendor(page, source, totalDeductCredits, 'correction', primaryJobId);
+        const v = await verifyTransaction(page, source.username, 'Correction', totalDeductCredits, primaryJobId);
+        result.deduct.success = true;
+        result.deduct.verified = v.verified;
+        result.deduct.transactionId = v.transactionId || null;
+        await saveSession(context, 'play777');
+      } catch (err) {
+        result.deduct.error = err.message;
+        logger.error('runCorrection: Step 1 deduct failed', { source: source.username, error: err.message });
+        return result; // no deposits if deduct didn't land
+      }
+      await humanDelay(5000, 10000); // inter-step pause
+    } else {
+      logger.info('runCorrection: skipDeduct=true, proceeding to deposits only', { source: source.username, credits: totalDeductCredits });
+    }
+
+    // STEP 2: deposits, one per target, all inside the same session.
+    for (let i = 0; i < targets.length; i++) {
+      const t = targets[i];
+      const dep = { jobId: t.jobId, account: t.account.username, credits: t.credits, success: false, verified: false, transactionId: null };
+      try {
+        await loadVendor(page, t.account, t.credits, 'deposit', t.jobId);
+        const v = await verifyTransaction(page, t.account.username, 'Deposit', t.credits, t.jobId);
+        dep.success = true;
+        dep.verified = v.verified;
+        dep.transactionId = v.transactionId || null;
+        await saveSession(context, 'play777');
+      } catch (err) {
+        dep.error = err.message;
+        logger.error('runCorrection: Step 2 deposit failed for target', { account: t.account.username, error: err.message });
+        // Continue to next target — partial success is still useful.
+      }
+      result.deposits.push(dep);
+      if (i < targets.length - 1) await humanDelay(5000, 10000); // inter-deposit pause
+    }
+
+    return result;
+  };
+
+  try {
+    return await Promise.race([
+      doRun(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Play777 correction timed out after 10 minutes')), CORRECTION_TIMEOUT_MS)
+      ),
+    ]);
+  } catch (err) {
+    logger.error('Play777 runCorrection fatal', { error: err });
+    return {
+      deduct: { ran: !skipDeduct, success: false, error: err.message, credits: totalDeductCredits },
+      deposits: targets.map((t) => ({ jobId: t.jobId, account: t.account.username, credits: t.credits, success: false, error: err.message })),
+    };
+  } finally {
+    if (session) {
+      await closeBrowser(session);
+    }
+  }
+}
+
+module.exports = { loadCredits, ensureLoggedIn, verifyTransaction, runCorrection };
