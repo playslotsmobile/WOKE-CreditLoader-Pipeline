@@ -104,7 +104,8 @@ async function readPlay777FromDashboard(page) {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       if (attempt === 0) {
-        await page.goto('https://pna.play777games.com/history/my-balance', {
+        // Renamed from /history/my-balance to /history/balance on/around 2026-05.
+        await page.goto('https://pna.play777games.com/history/balance', {
           waitUntil: 'domcontentloaded',
           timeout: 60000,
         });

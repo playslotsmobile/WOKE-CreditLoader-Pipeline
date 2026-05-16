@@ -8,7 +8,9 @@ const masterBalance = require('./masterBalance');
 
 const DASHBOARD_URL = 'https://pna.play777games.com/dashboard';
 const VENDORS_URL = 'https://pna.play777games.com/vendors-overview';
-const MY_BALANCE_URL = 'https://pna.play777games.com/history/my-balance';
+// Play777 renamed /history/my-balance -> /history/balance on/around 2026-05.
+// The old URL returns a 404 SPA page that hangs DCL until our timeout.
+const MY_BALANCE_URL = 'https://pna.play777games.com/history/balance';
 const USERNAME = process.env.PLAY777_USERNAME;
 const PASSWORD = process.env.PLAY777_PASSWORD;
 
