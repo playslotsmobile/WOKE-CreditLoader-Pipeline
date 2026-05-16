@@ -163,54 +163,86 @@ async function processInvoiceInternal(invoiceId, retryCount = 0) {
       throw new Error('No source vendor account found for correction');
     }
 
-    // Step 1: Correct (deduct) total credits from source account
     const totalCorrectionCredits = pendingJobs.reduce((s, j) => s + j.creditsAmount, 0);
-    logger.info('Correction Step 1: Deducting credits from source account', {
-      credits: totalCorrectionCredits,
-      sourceAccount: source.username,
-      operatorId: source.operatorId,
+
+    // Step 1 idempotency guard: if a prior attempt already succeeded in
+    // deducting from the source account, skip the deduct on this retry.
+    // Step 1 has no LoadJob row of its own (only Step 2 deposits do), so
+    // the only persistent trace of a successful deduct is the
+    // CORRECTION_DEDUCT_OK LoadEvent. Without this check, a partial
+    // failure on Step 2 would trigger a retry that re-runs Step 1 and
+    // double-deducts the source account.
+    const allInvoiceLoadJobIds = (
+      await prisma.loadJob.findMany({
+        where: { invoiceId },
+        select: { id: true },
+      })
+    ).map((j) => j.id);
+    const priorDeductOk = await prisma.loadEvent.findFirst({
+      where: {
+        loadJobId: { in: allInvoiceLoadJobIds },
+        step: 'CORRECTION_DEDUCT_OK',
+        status: 'SUCCESS',
+      },
     });
 
-    let deductResult;
-    if (DRY_RUN) {
-      logger.info('[DRY RUN] Would correct credits from source account', {
+    if (priorDeductOk) {
+      logger.warn('Correction Step 1 already completed on prior attempt — skipping deduct', {
+        invoiceId,
         credits: totalCorrectionCredits,
         sourceAccount: source.username,
+        priorEventId: priorDeductOk.id,
+        priorEventAt: priorDeductOk.createdAt,
       });
-      deductResult = { success: true };
     } else {
-      deductResult = await play777.loadCredits(
-        { username: source.username, operatorId: source.operatorId },
-        totalCorrectionCredits,
-        null,
-        'correction',
-        pendingJobs[0].id
-      );
-    }
-
-    if (!deductResult.success) {
-      logger.error('Correction failed: Could not deduct from source account', {
+      // Step 1: Correct (deduct) total credits from source account
+      logger.info('Correction Step 1: Deducting credits from source account', {
+        credits: totalCorrectionCredits,
         sourceAccount: source.username,
-        error: deductResult.error,
+        operatorId: source.operatorId,
       });
-      await emitEvent(pendingJobs[0].id, 'CORRECTION_DEDUCT_FAILED', 'FAILED', {
+
+      let deductResult;
+      if (DRY_RUN) {
+        logger.info('[DRY RUN] Would correct credits from source account', {
+          credits: totalCorrectionCredits,
+          sourceAccount: source.username,
+        });
+        deductResult = { success: true };
+      } else {
+        deductResult = await play777.loadCredits(
+          { username: source.username, operatorId: source.operatorId },
+          totalCorrectionCredits,
+          null,
+          'correction',
+          pendingJobs[0].id
+        );
+      }
+
+      if (!deductResult.success) {
+        logger.error('Correction failed: Could not deduct from source account', {
+          sourceAccount: source.username,
+          error: deductResult.error,
+        });
+        await emitEvent(pendingJobs[0].id, 'CORRECTION_DEDUCT_FAILED', 'FAILED', {
+          sourceAccount: source.username,
+          credits: totalCorrectionCredits,
+          error: deductResult.error,
+        });
+        await markAllJobsFailed(pendingJobs, `Failed to deduct from ${source.username}: ${deductResult.error}`);
+        await prisma.invoice.update({ where: { id: invoiceId }, data: { status: 'FAILED' } });
+        return { invoiceId, results: [deductResult], allSuccess: false };
+      }
+
+      logger.info('Correction Step 1 complete: credits deducted', {
+        credits: totalCorrectionCredits,
+        sourceAccount: source.username,
+      });
+      await emitEvent(pendingJobs[0].id, 'CORRECTION_DEDUCT_OK', 'SUCCESS', {
         sourceAccount: source.username,
         credits: totalCorrectionCredits,
-        error: deductResult.error,
       });
-      await markAllJobsFailed(pendingJobs, `Failed to deduct from ${source.username}: ${deductResult.error}`);
-      await prisma.invoice.update({ where: { id: invoiceId }, data: { status: 'FAILED' } });
-      return { invoiceId, results: [deductResult], allSuccess: false };
     }
-
-    logger.info('Correction Step 1 complete: credits deducted', {
-      credits: totalCorrectionCredits,
-      sourceAccount: source.username,
-    });
-    await emitEvent(pendingJobs[0].id, 'CORRECTION_DEDUCT_OK', 'SUCCESS', {
-      sourceAccount: source.username,
-      credits: totalCorrectionCredits,
-    });
     await new Promise((r) => setTimeout(r, 3000 + Math.random() * 5000));
 
     // Step 2: Deposit credits to each target vendor
