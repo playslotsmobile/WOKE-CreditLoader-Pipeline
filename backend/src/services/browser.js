@@ -150,8 +150,14 @@ async function rotateStickyProxySession(platform, profileId) {
   // Sticky session ID: random 10-digit number. DataImpulse keeps the
   // same exit IP for the lifetime of the session (typically ~10 min idle
   // timeout), which is the natural unit of "one load run."
+  //
+  // DataImpulse sticky-session syntax: `<user>__cr.<cc>__sid.<id>`. The
+  // first form I tried (`__cr.us-sid-<id>`) returns `503 NO_RAY` from
+  // the gateway — confirmed by curl probe on 2026-05-16. Valid sticky
+  // syntaxes confirmed via probe: `__cr.us__sid.<id>` and
+  // `__cr.us__sid-<id>`. Using the canonical dot form.
   const sid = Math.floor(Math.random() * 1e10).toString().padStart(10, '0');
-  const proxyUser = `${diUser}__cr.us-sid-${sid}`;
+  const proxyUser = `${diUser}__cr.us__sid.${sid}`;
   try {
     const res = await fetch(`${ADSPOWER_API}/api/v1/user/update`, {
       method: 'POST',
