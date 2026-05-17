@@ -113,20 +113,35 @@ async function processInvoiceInternal(invoiceId, retryCount = 0) {
 
   const isCorrection = invoice.method === 'Correction';
 
-  // Retry-of-FAILED entry: when we re-enter on an invoice that previously
-  // ended in FAILED (manual admin retry or trigger-load), the only LoadJob
-  // rows are stuck in FAILED status. Reset them to PENDING so this attempt
-  // actually re-tries them. Otherwise the pendingJobs query below returns
-  // [] and the "all already completed" branch would falsely flip the
-  // invoice to LOADED with nothing actually loaded on the platform —
-  // same bug shape as invoice 347 (2026-05-15).
-  if (invoice.status === 'FAILED') {
+  // Retry entry: reset any FAILED LoadJob rows back to PENDING so this
+  // attempt actually re-tries them. Two entry paths need this:
+  //
+  //   1) Manual retry on a FAILED invoice (admin trigger-load) — invoice
+  //      status is 'FAILED' on entry.
+  //   2) Autoloader auto-retry after a previous attempt's results had
+  //      failures — invoice status was flipped to 'PAID' in the retry
+  //      scheduler, but the LoadJob rows are still FAILED from the
+  //      previous attempt. retryCount > 0 identifies this path.
+  //
+  // Without this reset, the pendingJobs query below returns [] and the
+  // defensive guard (added 2026-05-16) correctly identifies an all-FAILED
+  // state and keeps the invoice FAILED — but that defeats the auto-retry's
+  // purpose. Bug shape was first observed on invoice 347 (2026-05-15) and
+  // again surfaced on invoice 365's smoke test (2026-05-16).
+  //
+  // Risk note: re-running a FAILED deposit could double-load if the
+  // platform actually delivered credits but our verifier missed it (see
+  // feedback_verify_iconnect_before_retry.md). Same risk as the prior
+  // behavior — the proper fix is verify-before-retry, deferred.
+  if (invoice.status === 'FAILED' || retryCount > 0) {
     const reset = await prisma.loadJob.updateMany({
       where: { invoiceId, status: 'FAILED' },
       data: { status: 'PENDING', errorMessage: null },
     });
     if (reset.count > 0) {
-      logger.info('Reset FAILED loadJobs to PENDING for retry', { invoiceId, count: reset.count });
+      logger.info('Reset FAILED loadJobs to PENDING for retry', {
+        invoiceId, count: reset.count, retryCount, fromStatus: invoice.status,
+      });
     }
   }
 
