@@ -161,27 +161,44 @@ async function processInvoiceInternal(invoiceId, retryCount = 0) {
   });
 
   if (pendingJobs.length === 0) {
-    // Defensive: only mark LOADED if at least one job actually succeeded
-    // AND no jobs are in FAILED state. The bug we're guarding against:
-    // an invoice with ALL FAILED jobs (no PENDING) would otherwise fall
-    // into the "all done" branch and get marked LOADED without anything
-    // actually loaded. Surfaced 2026-05-16 on smoke test of invoice 365.
+    // No PENDING jobs at this point can mean three things:
+    //   A) All jobs SUCCESS, no FAILED  → invoice complete  → LOADED
+    //   B) Zero allocations / zero jobs total (pure-repayment Invoice
+    //      with creditLineRepaymentIntent applied; the repayment was
+    //      recorded in processRepaymentIntent and there's no actual
+    //      credit-load work to do)  → effectively complete  → LOADED
+    //   C) Some jobs FAILED, no PENDING (retries exhausted, or partial
+    //      failure with no live retries scheduled)  → keep FAILED
+    //
+    // The bug we're guarding against (added 2026-05-16, surfaced on
+    // invoice 365): an invoice with ALL jobs FAILED used to fall into
+    // the original "all done" branch and get marked LOADED with zero
+    // credits actually delivered. The rule is `failedCount === 0`.
+    //
+    // Subtle: the earlier fix tightened this to `successCount > 0 &&
+    // failedCount === 0`, which broke case B (pure-repayment invoices)
+    // by lumping them with case C. Regression caught 2026-05-22 on
+    // Alex Noz's 5 ACH repayments. The right rule is just
+    // `failedCount === 0` — covers A and B, excludes C.
     const successCount = await prisma.loadJob.count({ where: { invoiceId, status: 'SUCCESS' } });
     const failedCount = await prisma.loadJob.count({ where: { invoiceId, status: 'FAILED' } });
-    if (successCount > 0 && failedCount === 0) {
+    if (failedCount === 0) {
       await prisma.invoice.update({
         where: { id: invoiceId },
         data: { status: 'LOADED', loadedAt: new Date() },
       });
-      logger.info('All loads already completed', { invoiceId });
+      logger.info('No pending work — invoice marked LOADED', {
+        invoiceId, successCount, failedCount,
+        note: successCount === 0 ? 'pure-repayment / zero-allocation' : 'all jobs previously succeeded',
+      });
       return { invoiceId, results: [], allSuccess: true };
     }
-    // No PENDING + some/all FAILED → invoice belongs in FAILED, not LOADED.
+    // No PENDING + some FAILED → real failure, keep FAILED.
     await prisma.invoice.update({
       where: { id: invoiceId },
       data: { status: 'FAILED' },
     });
-    logger.warn('No PENDING jobs and not all SUCCESS — invoice stays FAILED', {
+    logger.warn('No PENDING jobs and at least one FAILED — invoice stays FAILED', {
       invoiceId, successCount, failedCount,
     });
     return { invoiceId, results: [], allSuccess: false };
