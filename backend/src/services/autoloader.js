@@ -644,7 +644,7 @@ async function executeLoad(job, platform, account, credits, parentVendor, transa
   }
 
   // Update LoadJob record
-  await prisma.loadJob.update({
+  const updatedJob = await prisma.loadJob.update({
     where: { id: job.id },
     data: {
       status: result.success ? 'SUCCESS' : 'FAILED',
@@ -665,6 +665,50 @@ async function executeLoad(job, platform, account, credits, parentVendor, transa
     credits,
     error: result.error || null,
   });
+
+  // Thrash detection: a healthy load completes within ~3 attempts. Anything
+  // beyond that means we're stuck (rate-limit cascades, CF wall, depleted
+  // master swallowed silently, etc). Send a Telegram alert once per loadJob
+  // when attempts cross the threshold so the operator gets a real signal
+  // instead of the loop grinding silently for hours (as happened to
+  // loadJob 436 today — 48 attempts before it finally landed).
+  const THRASH_ATTEMPTS_THRESHOLD = 6;
+  if (!result.success && updatedJob.attempts >= THRASH_ATTEMPTS_THRESHOLD) {
+    try {
+      // Dedupe: only fire once per loadJob via a sentinel event.
+      const alreadyAlerted = await prisma.loadEvent.findFirst({
+        where: { loadJobId: job.id, step: 'LOAD_THRASH_ALERT_SENT' },
+      });
+      if (!alreadyAlerted) {
+        // Fetch invoice + vendor for the alert text
+        const inv = await prisma.invoice.findUnique({
+          where: { id: job.invoiceId },
+          include: { vendor: { select: { name: true } } },
+        });
+        await telegram.bot.sendMessage(
+          process.env.TELEGRAM_ADMIN_CHAT_ID,
+          `🌀 *LOAD THRASHING — operator action recommended*\n\n` +
+          `Invoice #${job.invoiceId} (${inv?.vendor?.name || 'unknown vendor'}) → ${account.username} on ${platform}\n` +
+          `LoadJob #${job.id} has hit *${updatedJob.attempts} attempts* without succeeding.\n\n` +
+          `Latest error: \`${(result.error || 'unknown').slice(0, 200)}\`\n\n` +
+          `*Likely causes:* rate-limit window saturated, CF block, master depleted, or session needs phone re-verification. Check Play777 admin via VNC and decide whether to wait it out, restart creditloader to clear in-memory retry state, or escalate.`,
+          { parse_mode: 'Markdown' }
+        );
+        await emitEvent(job.id, 'LOAD_THRASH_ALERT_SENT', 'INFO', {
+          attempts: updatedJob.attempts,
+          threshold: THRASH_ATTEMPTS_THRESHOLD,
+          latestError: (result.error || '').slice(0, 200),
+        });
+        logger.warn('Thrash alert sent to admin Telegram', {
+          jobId: job.id, invoiceId: job.invoiceId, attempts: updatedJob.attempts,
+        });
+      }
+    } catch (alertErr) {
+      logger.error('Thrash-alert pipeline failed', { jobId: job.id, error: alertErr.message });
+      // Never throw from the alert path — the load already happened, we
+      // don't want to confuse downstream by failing here.
+    }
+  }
 
   // Log verification result if available
   if (result.success && result.verified !== undefined) {

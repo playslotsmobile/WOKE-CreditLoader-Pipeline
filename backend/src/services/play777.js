@@ -196,13 +196,61 @@ async function fillDepositModal(page, credits, transactionType = 'deposit', jobI
     await confirmBtn.click();
   }
 
+  // Race the success indicator against the phone-verification form. When
+  // Master715 depletes mid-deposit, Play777 silently aborts the modal and
+  // routes the operator into a "change phone" / "verify phone" form
+  // (see reference_play777_master.md). The Confirm button then falls
+  // through to whatever's at that screen position now, which used to
+  // surface as a generic 'no success indicator found' timeout — and we
+  // had no idea master was depleted or session needed re-verification.
+  // Detect that state distinctly so the operator gets a real signal.
+  const PHONE_FORM_SELECTORS = [
+    'input[type="tel"]',
+    'input[name*="phone" i]',
+    'input[placeholder*="phone" i]',
+    '[class*="phone-verif" i]',
+    '[class*="change-phone" i]',
+    'h1:has-text("Verify Phone")',
+    'h2:has-text("Verify Phone")',
+    'h1:has-text("Change Phone")',
+    'h2:has-text("Change Phone")',
+    ':text-matches("verify your phone", "i")',
+  ].join(', ');
+
+  let outcome;
   try {
-    await page.waitForSelector('.toast-success, .alert-success, .swal2-success, [class*="success"]', { timeout: 15000 });
-    return true;
+    outcome = await Promise.race([
+      page.waitForSelector('.toast-success, .alert-success, .swal2-success, [class*="success"]', { timeout: 15000 })
+        .then(() => 'success'),
+      page.waitForSelector(PHONE_FORM_SELECTORS, { timeout: 15000 })
+        .then(() => 'phone_form'),
+    ]);
   } catch {
+    outcome = 'timeout';
+  }
+
+  if (outcome === 'phone_form') {
+    await captureFailure(page, jobId, 'PHONE_VERIFICATION_REQUIRED');
+    // Telegram the admin immediately — operator action is required and
+    // retrying into the same wall just burns rate-limit slots.
+    try {
+      await telegram.bot.sendMessage(
+        process.env.TELEGRAM_ADMIN_CHAT_ID,
+        `📵 *PHONE VERIFICATION REQUIRED — Play777 deposit blocked*\n\n` +
+        `LoadJob #${jobId} hit Play777's change-phone form mid-deposit (typically means Master715 is depleted or the session needs re-verification).\n\n` +
+        `*Action:* log into Play777 admin via VNC, complete the phone verification / top up master, then retry the affected invoice from the admin dashboard.`,
+        { parse_mode: 'Markdown' }
+      );
+    } catch (alertErr) {
+      logger.error('Telegram PHONE_VERIFICATION_REQUIRED alert send failed', { error: alertErr.message });
+    }
+    throw new Error('PHONE_VERIFICATION_REQUIRED: Master715 depleted or session needs phone re-verification — admin alerted');
+  }
+  if (outcome === 'timeout') {
     await captureFailure(page, jobId, 'DEPOSIT_CONFIRM_FAILED');
     throw new Error(`${transactionType === 'correction' ? 'Correction' : 'Deposit'} confirmation did not complete — no success indicator found`);
   }
+  return true;
 }
 
 async function dismissStuckModal(page, jobId = 0) {
