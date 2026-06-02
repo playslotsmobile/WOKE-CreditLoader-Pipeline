@@ -97,12 +97,19 @@ app.get('/api/vendors/:slug', async (req, res) => {
   }
 });
 
-// OAuth flow for QuickBooks
+// OAuth flow for QuickBooks.
+// Requests BOTH the Accounting scope (everything we already do) AND the
+// Payments scope (com.intuit.quickbooks.payment). If the app is enrolled for
+// the Payments API, Intuit's consent screen accepts both and the callback
+// stores a token that can finally read return/chargeback status directly —
+// making the QBO-scrape detector unnecessary. If the app is NOT enrolled,
+// Intuit rejects the payment scope at the consent step (that's our answer).
+// Superset scope is safe: all existing Accounting functionality is unaffected.
 app.get('/api/qb-auth', (req, res) => {
   const params = new URLSearchParams({
     client_id: process.env.QB_CLIENT_ID,
     response_type: 'code',
-    scope: 'com.intuit.quickbooks.accounting',
+    scope: 'com.intuit.quickbooks.accounting com.intuit.quickbooks.payment',
     redirect_uri: 'https://load.wokeavr.com/api/qb-callback',
     state: 'wokeavr',
   });
