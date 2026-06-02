@@ -80,11 +80,13 @@ async function recordReturn({ qbInvoiceId, amountLost, vendorName, returnDate, s
     ? await prisma.return.update({ where: { qbInvoiceId }, data })
     : await prisma.return.create({ data: { qbInvoiceId, ...data } });
 
-  // 3. Repeat-offender stats (by vendorId when mapped, else by vendorName)
-  const vendorWhere = record.vendorId
-    ? { vendorId: record.vendorId }
-    : { vendorName: record.vendorName };
-  const vendorReturns = await prisma.return.findMany({ where: vendorWhere });
+  // 3. Repeat-offender stats. Group by BOTH vendorId and the denormalized
+  // vendorName so a person with one mapped return (has vendorId) and one
+  // pre-DB return (vendorId null, name only) is still counted as one
+  // offender. vendorName is always populated and stable per-record.
+  const vendorOr = [{ vendorName: record.vendorName }];
+  if (record.vendorId) vendorOr.push({ vendorId: record.vendorId });
+  const vendorReturns = await prisma.return.findMany({ where: { OR: vendorOr } });
   const priorCount = vendorReturns.length; // includes this one
   const totalVendorLost = vendorReturns.reduce((s, r) => s + Number(r.amountLost), 0);
 
@@ -131,9 +133,11 @@ async function listReturns() {
   const totalCashLost = rows.reduce((s, r) => s + Number(r.amountLost), 0);
   const totalCreditsLost = rows.reduce((s, r) => s + r.creditsLost, 0);
 
+  // Group by vendorName (always populated, stable) so mapped + pre-DB returns
+  // for the same person aggregate into one offender row.
   const byVendorMap = new Map();
   for (const r of rows) {
-    const key = r.vendorId != null ? `v${r.vendorId}` : `n:${r.vendorName}`;
+    const key = r.vendorName;
     const agg = byVendorMap.get(key) || {
       vendorId: r.vendorId, vendorName: r.vendorName, businessName: r.businessName,
       count: 0, cashLost: 0, creditsLost: 0,
