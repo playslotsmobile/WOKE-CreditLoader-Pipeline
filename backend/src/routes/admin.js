@@ -10,6 +10,7 @@ const creditLineService = require('../services/creditLineService');
 const masterBalance = require('../services/masterBalance');
 const statsService = require('../services/statsService');
 const returnsService = require('../services/returnsService');
+const returnsDetector = require('../services/returnsDetector');
 const { requireAdmin, signToken } = require('../middleware/auth');
 const { logger } = require('../services/logger');
 
@@ -408,6 +409,20 @@ router.post('/returns', async (req, res) => {
   } catch (err) {
     logger.error('Record return error', { error: err.message });
     res.status(500).json({ error: err.message || 'Failed to record return' });
+  }
+});
+
+// On-demand returns scan via the QB Payments API (also runs every 6h
+// automatically). Optional body { windowDays }. Returns a summary of what was
+// found; any new returns are recorded + alerted by the scan itself.
+router.post('/returns/scan', async (req, res) => {
+  try {
+    const windowDays = req.body && req.body.windowDays ? parseInt(req.body.windowDays, 10) : undefined;
+    const result = await returnsDetector.scanRecentReturns(windowDays ? { windowDays } : {});
+    res.json({ success: true, ...result });
+  } catch (err) {
+    logger.error('Returns scan error', { error: err.message });
+    res.status(500).json({ error: err.message || 'Returns scan failed' });
   }
 });
 

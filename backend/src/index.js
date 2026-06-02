@@ -12,6 +12,7 @@ const creditLineRoutes = require('./routes/creditLine');
 const { startWebhookProcessor } = require('./services/webhookProcessor');
 const { startHealthChecks } = require('./services/healthDigest');
 const { resumeOrphanedLoads } = require('./services/loadResumption');
+const { startReturnsDetector } = require('./services/returnsDetector');
 const { logger } = require('./services/logger');
 const { requireAdmin } = require('./middleware/auth');
 
@@ -239,4 +240,7 @@ app.listen(PORT, async () => {
   resumeOrphanedLoads().catch((err) => logger.error('Load resumption failed', { error: err.message }));
   startWebhookProcessor();
   startHealthChecks();
+  // Poll the QB Payments API for returns/disputes on loaded invoices and
+  // alert the main group the moment one is found.
+  startReturnsDetector();
 });
