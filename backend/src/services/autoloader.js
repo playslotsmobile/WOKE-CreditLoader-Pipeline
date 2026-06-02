@@ -325,9 +325,56 @@ async function processInvoiceInternal(invoiceId, retryCount = 0) {
           credits: correctionResult.deduct.credits,
           error: correctionResult.deduct.error,
         });
+
+        // Telegram operator alert on FIRST Step 1 failure for this invoice.
+        // Deduped via CORRECTION_DEDUCT_FAIL_ALERT_SENT sentinel event so
+        // subsequent retries don't spam. Previously the system emitted ZERO
+        // notification on Step 1 deduct failure — sir had to find FAILED
+        // corrections by manually scanning the dashboard (surfaced
+        // 2026-06-01 on Cesar's #499 which sat silently for 2 days).
+        try {
+          const alreadyAlerted = await prisma.loadEvent.findFirst({
+            where: { loadJobId: { in: allInvoiceLoadJobIds }, step: 'CORRECTION_DEDUCT_FAIL_ALERT_SENT' },
+          });
+          if (!alreadyAlerted) {
+            await telegram.bot.sendMessage(
+              process.env.TELEGRAM_ADMIN_CHAT_ID,
+              `⚠️ *Correction Step 1 failed — operator may need to act*\n\n` +
+              `Invoice #${invoiceId} (${invoice.vendor.name}) — correction → ${pendingJobs.map((j) => j.vendorAccount.username).join(', ')}\n` +
+              `Step 1 (deduct from ${source.username}) failed: \`${(correctionResult.deduct.error || 'unknown').slice(0, 200)}\`\n\n` +
+              `Autoloader will retry up to ${MAX_RETRIES} times. If all retries fail, the invoice ends in FAILED on the dashboard — \"Mark Loaded Manually\" once you've verified the correction is done on Play777.`,
+              { parse_mode: 'Markdown' }
+            );
+            await emitEvent(pendingJobs[0].id, 'CORRECTION_DEDUCT_FAIL_ALERT_SENT', 'INFO', {
+              attemptedSource: source.username,
+              error: (correctionResult.deduct.error || '').slice(0, 200),
+            });
+          }
+        } catch (alertErr) {
+          logger.error('Correction Step 1 fail-alert send failed', { invoiceId, error: alertErr.message });
+        }
+
+        // Mark all pending deposit loadJobs FAILED (Step 2 never ran since
+        // Step 1 didn't land). Push failure results into `results` so the
+        // standard retry path at the bottom of processInvoiceInternal
+        // schedules retries — DO NOT early-return. Previously this branch
+        // returned immediately, giving corrections only 1 attempt vs the
+        // 3 attempts regular loads get. The c377a3f idempotency guard
+        // ensures a retry won't double-deduct (it checks for
+        // CORRECTION_DEDUCT_OK, which wasn't emitted here).
         await markAllJobsFailed(pendingJobs, `Failed to deduct from ${source.username}: ${correctionResult.deduct.error}`);
-        await prisma.invoice.update({ where: { id: invoiceId }, data: { status: 'FAILED' } });
-        return { invoiceId, results: [{ success: false, error: correctionResult.deduct.error }], allSuccess: false };
+        for (const job of pendingJobs) {
+          results.push({
+            success: false,
+            platform: 'PLAY777',
+            account: job.vendorAccount.username,
+            credits: job.creditsAmount,
+            error: `Failed to deduct from ${source.username}: ${correctionResult.deduct.error}`,
+          });
+        }
+        // Fall through. The Step 2 loop below is a no-op (deposits=[]
+        // when Step 1 failed), and the standard retry/final logic at
+        // line ~510 handles invoice status + retry scheduling.
       }
     }
 
