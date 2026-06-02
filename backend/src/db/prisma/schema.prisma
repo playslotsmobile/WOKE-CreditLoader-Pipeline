@@ -21,6 +21,7 @@ model Vendor {
   accounts VendorAccount[]
   invoices Invoice[]
   creditLine CreditLine?
+  returns  Return[]
 
   @@map("vendors")
 }
@@ -111,10 +112,40 @@ model Invoice {
   allocations            InvoiceAllocation[]
   loadJobs               LoadJob[]
   creditLineTransactions CreditLineTransaction[]
+  returns                Return[]
 
   @@index([qbInvoiceId])
   @@index([vendorId])
   @@map("invoices")
+}
+
+// Payment returns / chargebacks. These surface ONLY in QuickBooks Payments
+// (the card-processing layer) — they leave zero trace in the QB Accounting
+// API (verified 2026-06-01: returned and paid invoices are byte-identical,
+// no RefundReceipt / CreditMemo / JournalEntry / balance reopen). So returns
+// are recorded via manual flag or QBO web-scrape detection. Each row captures
+// the cash clawed back plus the credits we already delivered (unrecoverable).
+model Return {
+  id           Int       @id @default(autoincrement())
+  invoiceId    Int?      @map("invoice_id")        // null when the return predates our pipeline DB
+  qbInvoiceId  String    @unique @map("qb_invoice_id") // QB DocNumber — natural dedup key for alerts
+  vendorId     Int?      @map("vendor_id")          // null when unmapped/legacy
+  vendorName   String    @map("vendor_name")        // denormalized snapshot (survives vendor edits)
+  businessName String?   @map("business_name")
+  amountLost   Decimal   @map("amount_lost") @db.Decimal(10, 2) // cash returned to the vendor
+  creditsLost  Int       @default(0) @map("credits_lost")        // credits we delivered, unrecoverable
+  method       String?                                            // ACH / Credit-Debit / etc
+  returnDate   DateTime? @map("return_date")        // when QB shows it returned (if known)
+  detectedAt   DateTime  @default(now()) @map("detected_at")
+  source       String    @default("manual")         // manual | qbo_scrape | payments_api
+  acknowledged Boolean   @default(false)            // ops actioned / cleared it
+  note         String?
+
+  invoice Invoice? @relation(fields: [invoiceId], references: [id])
+  vendor  Vendor?  @relation(fields: [vendorId], references: [id])
+
+  @@index([vendorId])
+  @@map("returns")
 }
 
 // Per-account dollar/credit split for each invoice

@@ -9,6 +9,7 @@ const autoloader = require('../services/autoloader');
 const creditLineService = require('../services/creditLineService');
 const masterBalance = require('../services/masterBalance');
 const statsService = require('../services/statsService');
+const returnsService = require('../services/returnsService');
 const { requireAdmin, signToken } = require('../middleware/auth');
 const { logger } = require('../services/logger');
 
@@ -365,6 +366,64 @@ router.get('/corrections', async (req, res) => {
   } catch (err) {
     logger.error('Corrections error', { error: err });
     res.status(500).json({ error: 'Failed to fetch corrections' });
+  }
+});
+
+// ── Payment returns / chargebacks ────────────────────────────────────────
+// Returns leave no trace in the QB Accounting API (verified 2026-06-01), so
+// they're recorded via manual flag here (and, soon, an automatic QBO-scrape
+// detector). recordReturn fires a MAIN-group Telegram alert on first detection.
+
+// List all returns + dashboard aggregates (total cash/credits lost, worst
+// offenders ranked). Drives the dashboard "Returns" section.
+router.get('/returns', async (req, res) => {
+  try {
+    const data = await returnsService.listReturns();
+    res.json(data);
+  } catch (err) {
+    logger.error('List returns error', { error: err });
+    res.status(500).json({ error: 'Failed to fetch returns' });
+  }
+});
+
+// Flag a return manually. Body: { qbInvoiceId, amountLost?, vendorName?,
+// returnDate?, note? }. amountLost/vendorName only needed for returns that
+// predate our pipeline DB (otherwise inferred from the matched invoice).
+// Idempotent on qbInvoiceId — re-flagging updates, doesn't re-alert.
+router.post('/returns', async (req, res) => {
+  try {
+    const { qbInvoiceId, amountLost, vendorName, returnDate, note } = req.body || {};
+    if (!qbInvoiceId) return res.status(400).json({ error: 'qbInvoiceId is required' });
+    const result = await returnsService.recordReturn({
+      qbInvoiceId, amountLost, vendorName, returnDate, note, source: 'manual',
+    });
+    res.json({
+      success: true,
+      isNew: result.isNew,
+      alerted: result.isNew,
+      record: result.record,
+      vendorReturnCount: result.priorCount,
+      vendorTotalLost: result.totalVendorLost,
+    });
+  } catch (err) {
+    logger.error('Record return error', { error: err.message });
+    res.status(500).json({ error: err.message || 'Failed to record return' });
+  }
+});
+
+// Toggle acknowledged (ops actioned / cleared a return from the active list).
+router.post('/returns/:id/acknowledge', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { acknowledged = true } = req.body || {};
+    const updated = await prisma.return.update({
+      where: { id },
+      data: { acknowledged: !!acknowledged },
+    });
+    res.json({ success: true, id: updated.id, acknowledged: updated.acknowledged });
+  } catch (err) {
+    logger.error('Acknowledge return error', { error: err.message });
+    res.status(500).json({ error: 'Failed to update return' });
   }
 });
 
