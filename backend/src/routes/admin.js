@@ -328,10 +328,18 @@ router.post('/invoices/:id/resend-email', async (req, res) => {
     if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
     if (!invoice.qbInvoiceId) return res.status(400).json({ error: 'No QB invoice ID — cannot resend' });
 
-    await quickbooks.sendInvoiceEmail(invoice.qbInvoiceId, invoice.vendor.email);
+    // invoice.qbInvoiceId is the QB DocNumber (e.g. "6279"), but the QB
+    // send-email endpoint needs the internal QB Id (e.g. "21523"). Passing
+    // the DocNumber makes QB resolve transaction #6279 — which may be a
+    // Payment, not an Invoice — and fail with code 610 "Payment expected:
+    // Invoice". Resolve DocNumber → real Id first.
+    const qbInv = await quickbooks.findInvoiceByDocNumber(invoice.qbInvoiceId);
+    if (!qbInv) return res.status(404).json({ error: `QB invoice #${invoice.qbInvoiceId} not found` });
+
+    await quickbooks.sendInvoiceEmail(qbInv.Id, invoice.vendor.email);
     res.json({ success: true, message: `Invoice email resent to ${invoice.vendor.email}` });
   } catch (err) {
-    logger.error('Resend email error', { error: err });
+    logger.error('Resend email error', { error: err.message });
     res.status(500).json({ error: 'Failed to resend invoice email' });
   }
 });
