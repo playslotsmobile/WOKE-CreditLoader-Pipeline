@@ -183,21 +183,11 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(publicPath, 'index.html'));
 });
 
-// Expire stale REQUESTED invoices older than 7 days
-async function expireStaleInvoices() {
-  try {
-    const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const expired = await prisma.invoice.updateMany({
-      where: { status: 'REQUESTED', submittedAt: { lt: cutoff } },
-      data: { status: 'FAILED' },
-    });
-    if (expired.count > 0) {
-      logger.info('Expired stale REQUESTED invoices', { count: expired.count });
-    }
-  } catch (err) {
-    logger.error('Invoice expiry check failed', { error: err });
-  }
-}
+// NOTE: the 7-day stale-REQUESTED → FAILED auto-expiry was removed 2026-06-05
+// per operator instruction. Unpaid invoices stay REQUESTED indefinitely — they
+// remain open & payable in QB until their due date, so flipping them to FAILED
+// on our side was misleading (looked like a load failure) and lost the ability
+// to pay them late. Leave invoices in whatever status they're genuinely in.
 
 async function waitForAdsPower() {
   const ADSPOWER_API = process.env.ADSPOWER_API_URL || 'http://127.0.0.1:50325';
@@ -232,8 +222,7 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {
   logger.info('Backend running', { port: PORT });
   await waitForAdsPower();
-  expireStaleInvoices(); // Check on startup
-  setInterval(expireStaleInvoices, 60 * 60 * 1000); // Check every hour
+  // (stale-invoice auto-expiry removed 2026-06-05 — unpaid invoices stay REQUESTED)
   // Re-queue any invoices left in LOADING state when the previous process
   // died (deploy, OOM, crash). Without this, those invoices stay LOADING
   // forever — silently dropped.
