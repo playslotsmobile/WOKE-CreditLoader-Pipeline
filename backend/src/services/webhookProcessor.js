@@ -147,6 +147,42 @@ async function handlePayment(paymentId, log) {
       continue;
     }
 
+    // ── FULL-PAYMENT GUARD ──────────────────────────────────────────────
+    // NEVER start a load on a partial payment. By the time this webhook
+    // fires, QB has applied the payment, so the invoice's current Balance is
+    // the amount STILL OWED. If anything is owed, hold the invoice (leave it
+    // REQUESTED) and alert the admin — do NOT mark PAID or load. When the
+    // vendor pays the remainder it arrives as a separate payment webhook and
+    // this guard passes. Without this, a $930-of-$1030 payment loaded full
+    // credits — exactly what happened on Jose #6145. (qbInvoiceId here is the
+    // QB internal TxnId from the payment's LinkedTxn — what getInvoice wants.)
+    let qbBalance = null;
+    try {
+      const qbInv = await quickbooks.getInvoice(qbInvoiceId);
+      qbBalance = qbInv ? Number(qbInv.Balance) : null;
+    } catch (err) {
+      log.error('Full-payment check: failed to read QB balance — holding to be safe', { invoiceId: invoice.id, error: err.message });
+    }
+    if (qbBalance === null || qbBalance > 0.005) {
+      const owing = qbBalance === null ? 'unknown (QB read failed)' : `$${qbBalance.toFixed(2)}`;
+      log.warn('Partial/unverified payment — NOT loading, invoice held as REQUESTED', { invoiceId: invoice.id, qbBalance });
+      try {
+        await telegram.bot.sendMessage(
+          process.env.TELEGRAM_ADMIN_CHAT_ID,
+          `⚠️ *PARTIAL PAYMENT — NOT loaded*\n\n` +
+          `Invoice #${invoice.id} (QB #${invoice.qbInvoiceId}) — ${invoice.vendor.name}\n` +
+          `Invoice total: $${Number(invoice.totalAmount).toFixed(2)}\n` +
+          `Still owing in QB: *${owing}*\n\n` +
+          `Held as unpaid — *no credits loaded*. It will load automatically once the invoice is paid in full. Vendor was not notified.`,
+          { parse_mode: 'Markdown' }
+        );
+      } catch (alertErr) {
+        log.error('Partial-payment admin alert failed', { invoiceId: invoice.id, error: alertErr.message });
+      }
+      continue; // leave status REQUESTED; await full payment
+    }
+    // Fully paid (Balance 0) — safe to proceed to the load.
+
     // Credit-aware block check. Compares this invoice's actual credit
     // requirement per platform to the latest stored master balance. If any
     // platform can't cover the invoice's credits (with a 10% safety buffer),
