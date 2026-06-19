@@ -11,6 +11,7 @@ const masterBalance = require('../services/masterBalance');
 const statsService = require('../services/statsService');
 const returnsService = require('../services/returnsService');
 const returnsDetector = require('../services/returnsDetector');
+const reconcileService = require('../services/reconcileService');
 const { requireAdmin, signToken } = require('../middleware/auth');
 const { logger } = require('../services/logger');
 
@@ -431,6 +432,21 @@ router.post('/returns/scan', async (req, res) => {
   } catch (err) {
     logger.error('Returns scan error', { error: err.message });
     res.status(500).json({ error: err.message || 'Returns scan failed' });
+  }
+});
+
+// On-demand loaded-vs-paid reconciliation (also runs daily via cron). Confirms
+// every loaded invoice in the window is fully paid in QB; alerts on any that
+// aren't. Optional body { windowDays } (default 21; pass a big number for a
+// full historical audit). Returns the discrepancy list.
+router.post('/reconcile', async (req, res) => {
+  try {
+    const windowDays = req.body && req.body.windowDays ? parseInt(req.body.windowDays, 10) : undefined;
+    const result = await reconcileService.reconcileLoadedVsPaid(windowDays ? { windowDays } : {});
+    res.json({ success: true, ...result });
+  } catch (err) {
+    logger.error('Reconcile error', { error: err.message });
+    res.status(500).json({ error: err.message || 'Reconcile failed' });
   }
 });
 
