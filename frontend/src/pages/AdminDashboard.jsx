@@ -5,7 +5,7 @@ import InvoicePipeline from '../components/InvoicePipeline';
 import EventTimeline from '../components/EventTimeline';
 import MasterBalances from '../components/MasterBalances';
 
-const STATUSES = ['REQUESTED', 'PENDING', 'PAID', 'BLOCKED_LOW_MASTER', 'LOADING', 'FAILED', 'LOADED'];
+const STATUSES = ['REQUESTED', 'PENDING', 'PAID', 'BLOCKED_LOW_MASTER', 'BLOCKED_VERIFICATION', 'LOADING', 'FAILED', 'LOADED'];
 
 const DATE_PRESETS = [
   { key: 'today', label: 'Today' },
@@ -849,7 +849,7 @@ function SubmissionsView({ invoices, onShowEvents, onTriggerLoad, onMarkLoaded }
                   <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">{fmtDate(i.loadedAt)}</td>
                   <td className="px-3 py-2 whitespace-nowrap">
                     <div className="flex gap-2 items-center">
-                      {(i.status === 'FAILED' || i.status === 'BLOCKED_LOW_MASTER') && onTriggerLoad && (
+                      {(i.status === 'FAILED' || i.status === 'BLOCKED_LOW_MASTER' || i.status === 'BLOCKED_VERIFICATION') && onTriggerLoad && (
                         <button
                           onClick={() => onTriggerLoad(i.id)}
                           className="text-xs font-semibold text-red-400 hover:text-red-300"
@@ -858,7 +858,7 @@ function SubmissionsView({ invoices, onShowEvents, onTriggerLoad, onMarkLoaded }
                           Retry
                         </button>
                       )}
-                      {(i.status === 'FAILED' || i.status === 'PAID' || i.status === 'BLOCKED_LOW_MASTER') && onMarkLoaded && (
+                      {(i.status === 'FAILED' || i.status === 'PAID' || i.status === 'BLOCKED_LOW_MASTER' || i.status === 'BLOCKED_VERIFICATION') && onMarkLoaded && (
                         <button
                           onClick={() => onMarkLoaded(i.id)}
                           className="text-xs font-semibold text-green-400 hover:text-green-300"

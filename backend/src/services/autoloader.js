@@ -5,6 +5,7 @@ const prisma = require('../db/client');
 const { logger } = require('./logger');
 const creditLineService = require('./creditLineService');
 const masterBalance = require('./masterBalance');
+const blockadeDetector = require('./blockadeDetector');
 
 const DRY_RUN = process.env.DRY_RUN === 'true';
 const MAX_RETRIES = 3;
@@ -552,6 +553,43 @@ async function processInvoiceInternal(invoiceId, retryCount = 0) {
     const failed = results.filter((r) => !r.success);
     const attempt = retryCount + 1;
 
+    // BLOCKADE SHORT-CIRCUIT — if any failure is a human-action-required wall
+    // (phone/email/contact modal, Cloudflare hard block, CAPTCHA, dead session),
+    // STOP. Retrying just burns rate-limit slots and escalates CF from challenge
+    // to hard block (exactly what happened 2026-06-23). Flag the invoice as
+    // BLOCKED_VERIFICATION (visible in the pipeline) and alert the main group
+    // ONCE with the specific reason, screenshot, and the action needed.
+    const blockedHit = failed
+      .map((r) => ({ r, b: blockadeDetector.classify(r.error) }))
+      .find((x) => x.b);
+    if (blockedHit) {
+      const { b, r } = blockedHit;
+      await prisma.invoice.update({ where: { id: invoiceId }, data: { status: 'BLOCKED_VERIFICATION' } });
+      for (const job of pendingJobs) {
+        await emitEvent(job.id, 'BLOCKED_VERIFICATION', 'FAILED', { invoiceId, blockade: b.type });
+      }
+      const jobIds = pendingJobs.map((j) => j.id);
+      const alreadyAlerted = jobIds.length
+        ? await prisma.loadEvent.findFirst({ where: { loadJobId: { in: jobIds }, step: 'BLOCKADE_ALERT_SENT' } })
+        : null;
+      if (!alreadyAlerted) {
+        await blockadeDetector.alertBlockade(b, {
+          invoiceId,
+          vendorName: invoice.vendor.name,
+          screenshotPath: r.screenshotPath,
+        });
+        if (pendingJobs[0]) {
+          await emitEvent(pendingJobs[0].id, 'BLOCKADE_ALERT_SENT', 'INFO', { invoiceId, blockade: b.type });
+        }
+      }
+      logger.error('Load BLOCKED — human action required, stopped retrying', {
+        invoiceId,
+        blockade: b.type,
+        vendor: invoice.vendor.name,
+      });
+      return { invoiceId, results, allSuccess: false, blocked: b.type };
+    }
+
     if (attempt < MAX_RETRIES) {
       const delayMs = computeRetryDelay(failed, retryCount);
       logger.error('Loads failed, retrying', {
@@ -687,7 +725,9 @@ async function executeLoad(job, platform, account, credits, parentVendor, transa
       );
     }
   } catch (err) {
-    result = { success: false, error: err.message, platform, account: account.username };
+    // Preserve a pre-identified blockade + its screenshot so the failure path
+    // can stop-and-alert with the real reason instead of a generic retry.
+    result = { success: false, error: err.message, platform, account: account.username, screenshotPath: err.screenshotPath };
   }
 
   // Update LoadJob record
