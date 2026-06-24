@@ -5,6 +5,7 @@ const telegram = require('./telegram');
 const prisma = require('../db/client');
 const { logger } = require('./logger');
 const masterBalance = require('./masterBalance');
+const blockadeDetector = require('./blockadeDetector');
 
 const DASHBOARD_URL = 'https://pna.play777games.com/dashboard';
 const VENDORS_URL = 'https://pna.play777games.com/vendors-overview';
@@ -291,7 +292,23 @@ async function navigateToVendorsAndWait(page, jobId = 0) {
         await page.reload({ waitUntil: 'domcontentloaded', timeout: 90000 });
         await humanDelay(8000, 12000);
       } else {
-        await captureFailure(page, jobId, 'VENDORS_TABLE_EMPTY');
+        // The table never loaded. Before reporting a generic timeout, figure
+        // out WHY — a blocking modal ("Update Your Contact" phone wall) or a
+        // Cloudflare block page looks identical to "slow table" from here, but
+        // needs a human, not a retry. Tag the error with BLOCKADE:<TYPE> so the
+        // autoloader stops + alerts instead of thrashing into the wall.
+        const blockade = await blockadeDetector.detectOnPage(page);
+        const shotPath = await captureFailure(
+          page,
+          jobId,
+          blockade ? `BLOCKED_${blockade.type}` : 'VENDORS_TABLE_EMPTY'
+        );
+        if (blockade) {
+          const err = new Error(`BLOCKADE:${blockade.type}: ${blockade.label} on vendors page`);
+          err.blockade = blockade;
+          err.screenshotPath = shotPath;
+          throw err;
+        }
         throw new Error('Vendors table did not load after 2 attempts');
       }
     }

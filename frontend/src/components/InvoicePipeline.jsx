@@ -6,6 +6,7 @@ const STATUS_CONFIG = {
   PENDING: { label: 'Pending Wire', color: 'orange', icon: '🔒' },
   PAID: { label: 'Paid', color: 'blue', icon: '💰' },
   BLOCKED_LOW_MASTER: { label: 'Blocked (Low Master)', color: 'fuchsia', icon: '⛔' },
+  BLOCKED_VERIFICATION: { label: 'Blocked (Needs You)', color: 'fuchsia', icon: '📵' },
   LOADING: { label: 'Loading', color: 'purple', icon: '⏳' },
   LOADED: { label: 'Loaded', color: 'green', icon: '✅' },
   FAILED: { label: 'Failed', color: 'red', icon: '🚨' },

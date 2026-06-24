@@ -91,6 +91,7 @@ enum InvoiceStatus {
   LOADED
   FAILED
   BLOCKED_LOW_MASTER
+  BLOCKED_VERIFICATION
 }
 
 model Invoice {
