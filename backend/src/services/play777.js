@@ -384,8 +384,31 @@ async function loadOperator(page, vendor, operator, credits, transactionType = '
 // Verify a transaction by checking My Balance page
 async function verifyTransaction(page, expectedAccount, expectedType, expectedCredits, jobId = 0) {
   try {
-    // 90s navigation timeout — CF can re-challenge mid-session on this URL too.
-    await page.goto(MY_BALANCE_URL, { waitUntil: 'domcontentloaded', timeout: 90000 });
+    // Navigate to My Balance. Prefer SPA routing (click the in-app sidebar
+    // link) over a fresh page.goto deep-link: the browser is already logged in
+    // and past Cloudflare here, but a direct goto to /history/balance gets
+    // CF-challenged ~18% of the time and times out at 90s — skipping
+    // verification entirely. Clicking the link routes client-side with no full
+    // document load for CF to intercept (the 2026-06-23 root-vs-deeplink find).
+    // Fall back to the direct goto if the link isn't present.
+    let onBalancePage = false;
+    try {
+      const balanceLink = page
+        .locator('a[href="/history/balance"], a[href$="/history/balance"], a:has-text("My Balance")')
+        .first();
+      if ((await balanceLink.count()) > 0) {
+        await balanceLink.click({ timeout: 10000 });
+        await page.waitForURL('**/history/balance', { timeout: 30000 });
+        onBalancePage = true;
+        logger.info('My Balance reached via SPA nav (no deep-link goto)', { jobId });
+      }
+    } catch (navErr) {
+      logger.warn('My Balance SPA nav failed — falling back to direct goto', { jobId, error: navErr.message });
+    }
+    if (!onBalancePage) {
+      // 90s navigation timeout — CF can re-challenge mid-session on this URL too.
+      await page.goto(MY_BALANCE_URL, { waitUntil: 'domcontentloaded', timeout: 90000 });
+    }
     try {
       await page.waitForLoadState('networkidle', { timeout: 15000 });
     } catch {}
