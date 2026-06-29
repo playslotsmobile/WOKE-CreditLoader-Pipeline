@@ -23,6 +23,11 @@ const BLOCKADES = [
     type: 'CF_BLOCK',
     emoji: '🛑',
     label: 'Cloudflare hard block',
+    // CF blocks are TRANSIENT — they self-clear in minutes (Tony #6451: cleared
+    // in 16 min). Unlike the phone/email/captcha walls, this one doesn't need a
+    // human; the CF auto-resume sweep retries it on a fresh exit IP after a
+    // cooldown. Only escalates to "needs you" if it's still blocked after N tries.
+    autoResume: true,
     patterns: [
       /sorry,?\s*you have been blocked/i,
       /attention required.*cloudflare/i,
@@ -140,13 +145,33 @@ async function detectOnPage(page) {
  * failure screenshot attached when we have one. Caller is responsible for
  * dedup (don't spam the same invoice). Never throws.
  */
-async function alertBlockade(blockade, { invoiceId, vendorName, jobId, screenshotPath } = {}) {
-  const caption =
-    `${blockade.emoji} *LOAD BLOCKED — ${blockade.label}*\n\n` +
-    `Invoice #${invoiceId || '?'}${vendorName ? ` — ${vendorName}` : ''}\n` +
-    `Type: \`${blockade.type}\`\n\n` +
-    `The loader hit a wall that needs a human, so it *STOPPED* — it is not retrying (retrying just trips Cloudflare).\n\n` +
-    `*Action:* ${blockade.action}`;
+async function alertBlockade(blockade, { invoiceId, vendorName, jobId, screenshotPath, mode = 'needs-human', attempts } = {}) {
+  const who = `Invoice #${invoiceId || '?'}${vendorName ? ` — ${vendorName}` : ''}`;
+  let body;
+  if (mode === 'auto-retry') {
+    // Transient (CF) — credits are held and the loader will retry itself on a
+    // fresh exit IP after a cooldown. No human action needed yet.
+    body =
+      `${blockade.emoji} *LOAD HELD — ${blockade.label}*\n\n` +
+      `${who}\nType: \`${blockade.type}\`\n\n` +
+      `Credits are *held* (not lost) — the loader will *auto-retry* on a fresh IP after a short cooldown. ` +
+      `No action needed unless you get an "auto-retry exhausted" alert for this invoice.`;
+  } else if (mode === 'exhausted') {
+    // CF auto-retries used up — now it genuinely needs a person.
+    body =
+      `🚨 *LOAD STILL BLOCKED — ${blockade.label}* (auto-retry exhausted)\n\n` +
+      `${who}\nType: \`${blockade.type}\`\n\n` +
+      `The loader auto-retried ${attempts != null ? attempts : 'several'}× and is *still* CF-blocked. It has stopped — *this one needs you.*\n\n` +
+      `*Action:* ${blockade.action}`;
+  } else {
+    // Human-required wall (phone/email/captcha/login) — stop and wait for a person.
+    body =
+      `${blockade.emoji} *LOAD BLOCKED — ${blockade.label}*\n\n` +
+      `${who}\nType: \`${blockade.type}\`\n\n` +
+      `The loader hit a wall that needs a human, so it *STOPPED* — it is not retrying (retrying just trips Cloudflare).\n\n` +
+      `*Action:* ${blockade.action}`;
+  }
+  const caption = body;
   const telegram = require('./telegram');
   try {
     if (screenshotPath && fs.existsSync(screenshotPath)) {

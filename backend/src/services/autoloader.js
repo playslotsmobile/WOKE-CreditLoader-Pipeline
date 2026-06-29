@@ -573,18 +573,22 @@ async function processInvoiceInternal(invoiceId, retryCount = 0) {
         ? await prisma.loadEvent.findFirst({ where: { loadJobId: { in: jobIds }, step: 'BLOCKADE_ALERT_SENT' } })
         : null;
       if (!alreadyAlerted) {
+        // CF blocks are transient → "held, auto-retrying" wording (the CF resume
+        // sweep handles the retry). Everything else genuinely needs a human now.
         await blockadeDetector.alertBlockade(b, {
           invoiceId,
           vendorName: invoice.vendor.name,
           screenshotPath: r.screenshotPath,
+          mode: b.autoResume ? 'auto-retry' : 'needs-human',
         });
         if (pendingJobs[0]) {
           await emitEvent(pendingJobs[0].id, 'BLOCKADE_ALERT_SENT', 'INFO', { invoiceId, blockade: b.type });
         }
       }
-      logger.error('Load BLOCKED — human action required, stopped retrying', {
+      logger.error('Load BLOCKED', {
         invoiceId,
         blockade: b.type,
+        autoResume: !!b.autoResume,
         vendor: invoice.vendor.name,
       });
       return { invoiceId, results, allSuccess: false, blocked: b.type };
@@ -827,4 +831,79 @@ async function markAllJobsFailed(jobs, errorMessage) {
   }
 }
 
-module.exports = { processInvoice };
+// CF auto-resume sweep — re-queue invoices stranded by a *Cloudflare* block.
+// CF blocks are transient (Tony #6451 cleared in 16 min) but BLOCKED_VERIFICATION
+// has no auto-resume, so without this a paid invoice sits until a human clicks
+// Retry (Tony waited ~13h). This runs on an interval and is fully DB-driven, so
+// it survives restarts (no fragile in-memory timer). ONLY CF_BLOCK auto-resumes;
+// phone/email/captcha/login stay parked for a human. Bounded by MAX_CF_RETRIES,
+// after which it escalates to a "needs you" alert and stops.
+const CF_RESUME_COOLDOWN_MS = 20 * 60 * 1000; // wait 20 min after a block before retrying
+const MAX_CF_RETRIES = 3; // give up (escalate to human) after this many auto-retries
+
+async function resumeCfBlockedInvoices() {
+  let resumed = 0;
+  try {
+    const blocked = await prisma.invoice.findMany({
+      where: { status: 'BLOCKED_VERIFICATION' },
+      include: { vendor: { select: { name: true } }, loadJobs: { select: { id: true } } },
+    });
+    for (const inv of blocked) {
+      const jobIds = inv.loadJobs.map((j) => j.id);
+      if (!jobIds.length) continue;
+
+      // Only CF blocks auto-resume — check the most recent block event's cause.
+      const lastBlock = await prisma.loadEvent.findFirst({
+        where: { loadJobId: { in: jobIds }, step: 'BLOCKED_VERIFICATION' },
+        orderBy: { id: 'desc' },
+      });
+      const meta = lastBlock && (typeof lastBlock.metadata === 'string' ? JSON.parse(lastBlock.metadata) : lastBlock.metadata);
+      if (!meta || meta.blockade !== 'CF_BLOCK') continue;
+
+      // Respect the cooldown — give CF time to release the IP.
+      const ageMs = Date.now() - new Date(lastBlock.createdAt).getTime();
+      if (ageMs < CF_RESUME_COOLDOWN_MS) continue;
+
+      const cfRetries = await prisma.loadEvent.count({
+        where: { loadJobId: { in: jobIds }, step: 'CF_COOLDOWN_RETRY' },
+      });
+      if (cfRetries >= MAX_CF_RETRIES) {
+        // Out of auto-retries — escalate to a human, once.
+        const escalated = await prisma.loadEvent.findFirst({
+          where: { loadJobId: { in: jobIds }, step: 'CF_EXHAUSTED_ALERT_SENT' },
+        });
+        if (!escalated) {
+          await blockadeDetector.alertBlockade(
+            blockadeDetector.BLOCKADES.find((x) => x.type === 'CF_BLOCK'),
+            { invoiceId: inv.id, vendorName: inv.vendor.name, mode: 'exhausted', attempts: cfRetries }
+          );
+          await emitEvent(jobIds[0], 'CF_EXHAUSTED_ALERT_SENT', 'INFO', { invoiceId: inv.id, attempts: cfRetries });
+          logger.error('CF auto-resume exhausted — escalated to human', { invoiceId: inv.id, attempts: cfRetries });
+        }
+        continue;
+      }
+
+      // Re-queue: reset FAILED jobs → PENDING (preserves SUCCESS jobs, so no
+      // double-load), flip to PAID, and run. A fresh exit IP is rotated per
+      // launch by the browser layer, so the retry isn't on the blocked IP.
+      await emitEvent(jobIds[0], 'CF_COOLDOWN_RETRY', 'INFO', { invoiceId: inv.id, attempt: cfRetries + 1 });
+      await prisma.loadJob.updateMany({
+        where: { invoiceId: inv.id, status: 'FAILED' },
+        data: { status: 'PENDING', errorMessage: null },
+      });
+      await prisma.invoice.update({ where: { id: inv.id }, data: { status: 'PAID' } });
+      logger.warn('CF auto-resume — re-queuing blocked invoice', {
+        invoiceId: inv.id, vendor: inv.vendor.name, attempt: cfRetries + 1,
+      });
+      processInvoice(inv.id).catch((err) =>
+        logger.error('CF auto-resume requeue failed', { invoiceId: inv.id, error: err.message })
+      );
+      resumed += 1;
+    }
+  } catch (err) {
+    logger.error('CF auto-resume sweep failed', { error: err.message });
+  }
+  return { resumed };
+}
+
+module.exports = { processInvoice, resumeCfBlockedInvoices };

@@ -12,6 +12,7 @@ const creditLineRoutes = require('./routes/creditLine');
 const { startWebhookProcessor } = require('./services/webhookProcessor');
 const { startHealthChecks } = require('./services/healthDigest');
 const { resumeOrphanedLoads } = require('./services/loadResumption');
+const { resumeCfBlockedInvoices } = require('./services/autoloader');
 const { startReturnsDetector } = require('./services/returnsDetector');
 const { logger } = require('./services/logger');
 const { requireAdmin } = require('./middleware/auth');
@@ -232,4 +233,11 @@ app.listen(PORT, async () => {
   // Poll the QB Payments API for returns/disputes on loaded invoices and
   // alert the main group the moment one is found.
   startReturnsDetector();
+  // CF auto-resume: every 10 min, re-queue invoices stranded by a transient
+  // Cloudflare block once their cooldown elapses (bounded, then escalates to a
+  // human). Phone/email/captcha blocks are NOT touched — those need a person.
+  resumeCfBlockedInvoices().catch((err) => logger.error('CF auto-resume sweep failed', { error: err.message }));
+  setInterval(() => {
+    resumeCfBlockedInvoices().catch((err) => logger.error('CF auto-resume sweep failed', { error: err.message }));
+  }, 10 * 60 * 1000);
 });
