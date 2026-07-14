@@ -182,6 +182,71 @@ async function checkStaleLoads() {
   }
 }
 
+// AdsPower usability monitor. The daily digest already authenticates against
+// AdsPower, but once a day is too slow — a mid-day AdsPower outage (logged out
+// because the subscription balance ran dry, a regenerated API key, or a dead
+// daemon) silently blocks EVERY load until the next 8am digest. This probes
+// often and alerts the main group the moment AdsPower stops being usable, with
+// the specific reason + what to check first. Uses an authenticated call
+// (`/status` is keyless and returns OK even when logged out — useless here).
+let adspowerFailStreak = 0;
+let adspowerDown = false;
+const ADSPOWER_FAIL_THRESHOLD = 2; // ~2 consecutive failures (10 min) before alerting — rides out transient blips
+
+async function checkAdsPowerHealth() {
+  let ok = false;
+  let reason = 'unreachable';
+  try {
+    const res = await fetch(`${ADSPOWER_API}/api/v1/user/list?page_size=1`, {
+      headers: { Authorization: `Bearer ${ADSPOWER_TOKEN}` },
+      signal: AbortSignal.timeout(8000),
+    });
+    const data = await res.json();
+    ok = data.code === 0;
+    if (!ok) reason = data.msg || `code ${data.code}`;
+  } catch {
+    ok = false;
+    reason = 'AdsPower API unreachable (daemon down / not responding)';
+  }
+
+  try {
+    if (ok) {
+      if (adspowerDown) {
+        adspowerDown = false;
+        await telegram.bot.sendMessage(
+          process.env.TELEGRAM_ADMIN_CHAT_ID,
+          `✅ *AdsPower back up* — loads can run again. Retry any FAILED/BLOCKED invoices from the dashboard.`,
+          { parse_mode: 'Markdown' }
+        );
+        log.info('AdsPower recovered — all-clear sent');
+      }
+      adspowerFailStreak = 0;
+      return;
+    }
+
+    adspowerFailStreak += 1;
+    if (adspowerFailStreak >= ADSPOWER_FAIL_THRESHOLD && !adspowerDown) {
+      adspowerDown = true;
+      let hint;
+      if (/api key mismatch/i.test(reason)) {
+        hint = 'AdsPower regenerated its API key (usually after a re-login). Copy the new key from AdsPower → API & MCP and update `ADSPOWER_API_KEY` in the backend .env, then restart the service.';
+      } else if (/api-?key/i.test(reason)) {
+        hint = 'AdsPower is rejecting our API key — it most likely *logged itself out* (this happens when the subscription BALANCE runs out). Check the AdsPower balance, recharge if needed, and log back in via VNC.';
+      } else {
+        hint = 'AdsPower is not responding — it may be logged out (check the account BALANCE first — a lapsed subscription logs it out and shows a login screen) or the daemon is down (restart it).';
+      }
+      await telegram.bot.sendMessage(
+        process.env.TELEGRAM_ADMIN_CHAT_ID,
+        `🛑 *ADSPOWER DOWN — ALL LOADS BLOCKED*\n\nAdsPower is not usable, so no credits can load for anyone.\nReason: \`${reason}\`\n\n*First thing to check:* the AdsPower account *balance* — if it ran out, AdsPower logs out and everything stops.\n\n*Fix:* ${hint}`,
+        { parse_mode: 'Markdown' }
+      );
+      log.error('AdsPower DOWN — alerted main group', { reason, failStreak: adspowerFailStreak });
+    }
+  } catch (err) {
+    log.error('AdsPower health alert failed to send', { error: err.message, reason });
+  }
+}
+
 function startHealthChecks() {
   // Daily digest at 8:00 AM CDT (13:00 UTC)
   const scheduleDigest = () => {
@@ -200,6 +265,12 @@ function startHealthChecks() {
   scheduleDigest();
   setInterval(checkStaleLoads, 5 * 60 * 1000);
 
+  // AdsPower usability probe: 90s after boot, then every 5 min. Alerts the main
+  // group the moment AdsPower stops being usable (logged out / balance out / key
+  // changed / daemon down) so an outage doesn't silently block loads for hours.
+  setTimeout(checkAdsPowerHealth, 90 * 1000);
+  setInterval(checkAdsPowerHealth, 5 * 60 * 1000);
+
   // Master balance sweep every 2 hours. First run is delayed 5 minutes after
   // startup so it doesn't collide with any in-flight boot-time load processing.
   const runSweep = async () => {
@@ -217,4 +288,4 @@ function startHealthChecks() {
   log.info('Master balance sweep scheduled: first run in 5 min, then every 2h');
 }
 
-module.exports = { sendDailyDigest, checkStaleLoads, startHealthChecks };
+module.exports = { sendDailyDigest, checkStaleLoads, checkAdsPowerHealth, startHealthChecks };
