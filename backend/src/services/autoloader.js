@@ -564,11 +564,60 @@ async function processInvoiceInternal(invoiceId, retryCount = 0) {
       .find((x) => x.b);
     if (blockedHit) {
       const { b, r } = blockedHit;
+      const jobIds = pendingJobs.map((j) => j.id);
+
+      // Master-depletion masquerading as a phone block: Play777 aborts the deposit
+      // into the change-phone form when Master715 runs dry, which classifies as
+      // PHONE_VERIFICATION (human-required → parks forever). If the master actually
+      // can't cover this invoice, it's really low-master — route to BLOCKED_LOW_MASTER
+      // so it AUTO-RESUMES on the next refill (existing master sweep) instead of
+      // stranding a paid vendor (Claudia #831 sat 1.5d). A genuine "Update Your
+      // Contact" phone modal with a HEALTHY master still parks as PHONE_VERIFICATION.
+      let lowMaster = false;
+      if (b.type === 'PHONE_VERIFICATION') {
+        try {
+          const decision = await masterBalance.canLoadInvoice(invoice);
+          lowMaster = !decision.canLoad;
+          if (lowMaster) {
+            logger.warn('Phone block is actually master depletion — reclassifying to BLOCKED_LOW_MASTER', { invoiceId, checks: decision.checks });
+          }
+        } catch (e) {
+          logger.error('Low-master reclassify check failed — treating as phone block', { invoiceId, error: e.message });
+        }
+      }
+
+      if (lowMaster) {
+        // Reset the failed leg(s) → PENDING (the change-phone abort never deposited;
+        // SUCCESS legs are preserved = no double-load) so the master-refill auto-resume
+        // actually re-loads them. Then flag BLOCKED_LOW_MASTER (self-heals on top-up).
+        await prisma.loadJob.updateMany({ where: { invoiceId, status: 'FAILED' }, data: { status: 'PENDING', errorMessage: null } });
+        await prisma.invoice.update({ where: { id: invoiceId }, data: { status: 'BLOCKED_LOW_MASTER' } });
+        for (const job of pendingJobs) {
+          await emitEvent(job.id, 'BLOCKED_LOW_MASTER', 'FAILED', { invoiceId, reclassifiedFrom: 'PHONE_VERIFICATION' });
+        }
+        const alreadyLM = jobIds.length
+          ? await prisma.loadEvent.findFirst({ where: { loadJobId: { in: jobIds }, step: 'LOW_MASTER_ALERT_SENT' } })
+          : null;
+        if (!alreadyLM && pendingJobs[0]) {
+          try {
+            await telegram.bot.sendMessage(
+              process.env.TELEGRAM_ADMIN_CHAT_ID,
+              `⛔ *LOAD HELD — Play777 master credits low*\n\nInvoice #${invoiceId} — ${invoice.vendor.name}\n\nPlay777 aborted the deposit into the change-phone form because Master715 is depleted. Held as *BLOCKED_LOW_MASTER* — it will *auto-resume* the moment the master is topped up (next balance sweep). Just refill Master715; no manual retry needed.`,
+              { parse_mode: 'Markdown' }
+            );
+          } catch (e) {
+            logger.error('Low-master alert send failed', { invoiceId, error: e.message });
+          }
+          await emitEvent(pendingJobs[0].id, 'LOW_MASTER_ALERT_SENT', 'INFO', { invoiceId });
+        }
+        logger.warn('Load reclassified BLOCKED_LOW_MASTER from phone block', { invoiceId, vendor: invoice.vendor.name });
+        return { invoiceId, results, allSuccess: false, blocked: 'BLOCKED_LOW_MASTER' };
+      }
+
       await prisma.invoice.update({ where: { id: invoiceId }, data: { status: 'BLOCKED_VERIFICATION' } });
       for (const job of pendingJobs) {
         await emitEvent(job.id, 'BLOCKED_VERIFICATION', 'FAILED', { invoiceId, blockade: b.type });
       }
-      const jobIds = pendingJobs.map((j) => j.id);
       const alreadyAlerted = jobIds.length
         ? await prisma.loadEvent.findFirst({ where: { loadJobId: { in: jobIds }, step: 'BLOCKADE_ALERT_SENT' } })
         : null;
