@@ -906,4 +906,61 @@ async function resumeCfBlockedInvoices() {
   return { resumed };
 }
 
-module.exports = { processInvoice, resumeCfBlockedInvoices };
+// Re-nag sweep for HUMAN-required blockades (phone/email/captcha/login). Those
+// park as BLOCKED_VERIFICATION and alert ONCE — but if that single alert is
+// missed (Claudia #831's fired at 3 AM and the load sat 1.5 days), nothing ever
+// nags again. This re-alerts the main group every RENAG hours, with how long
+// it's been waiting, until a human resolves it (status leaves BLOCKED_VERIFICATION).
+// CF blocks are skipped here — they auto-resume via resumeCfBlockedInvoices().
+const HUMAN_RENAG_INTERVAL_MS = 2 * 60 * 60 * 1000; // re-nag every 2h until resolved
+
+async function renagHumanBlockades() {
+  try {
+    const blocked = await prisma.invoice.findMany({
+      where: { status: 'BLOCKED_VERIFICATION' },
+      include: { vendor: { select: { name: true } }, loadJobs: { select: { id: true } } },
+    });
+    for (const inv of blocked) {
+      const jobIds = inv.loadJobs.map((j) => j.id);
+      if (!jobIds.length) continue;
+
+      const lastBlock = await prisma.loadEvent.findFirst({
+        where: { loadJobId: { in: jobIds }, step: 'BLOCKED_VERIFICATION' },
+        orderBy: { id: 'desc' },
+      });
+      const meta = lastBlock && (typeof lastBlock.metadata === 'string' ? JSON.parse(lastBlock.metadata) : lastBlock.metadata);
+      if (!meta) continue;
+      if (meta.blockade === 'CF_BLOCK') continue; // CF auto-resumes — not a human's problem
+
+      // Nag interval is measured from the most recent alert (initial or prior re-nag).
+      const lastAlert = await prisma.loadEvent.findFirst({
+        where: { loadJobId: { in: jobIds }, step: { in: ['BLOCKADE_ALERT_SENT', 'BLOCKADE_RENAG'] } },
+        orderBy: { id: 'desc' },
+      });
+      const lastAlertAt = new Date((lastAlert || lastBlock).createdAt).getTime();
+      if (Date.now() - lastAlertAt < HUMAN_RENAG_INTERVAL_MS) continue;
+
+      const hours = Math.floor((Date.now() - new Date(lastBlock.createdAt).getTime()) / 3_600_000);
+      const b = blockadeDetector.BLOCKADES.find((x) => x.type === meta.blockade);
+      const label = b ? b.label : meta.blockade;
+      const action = b ? b.action : 'Resolve it in the platform, then retry the invoice from the dashboard.';
+      try {
+        await telegram.bot.sendMessage(
+          process.env.TELEGRAM_ADMIN_CHAT_ID,
+          `⏰ *STILL BLOCKED ~${hours}h — NEEDS YOU* ${b ? b.emoji : ''}\n\n` +
+          `Invoice #${inv.id} — ${inv.vendor.name}\n${label}\n\n` +
+          `This has been waiting on a human for ~${hours}h and will NOT clear itself.\n\n*Action:* ${action}`,
+          { parse_mode: 'Markdown' }
+        );
+        await emitEvent(jobIds[0], 'BLOCKADE_RENAG', 'INFO', { invoiceId: inv.id, blockade: meta.blockade, hoursBlocked: hours });
+        logger.warn('Re-nagged human-required blockade', { invoiceId: inv.id, blockade: meta.blockade, hours });
+      } catch (e) {
+        logger.error('Blockade re-nag send failed', { invoiceId: inv.id, error: e.message });
+      }
+    }
+  } catch (err) {
+    logger.error('Human blockade re-nag sweep failed', { error: err.message });
+  }
+}
+
+module.exports = { processInvoice, resumeCfBlockedInvoices, renagHumanBlockades };

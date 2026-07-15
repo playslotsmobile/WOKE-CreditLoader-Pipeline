@@ -12,7 +12,7 @@ const creditLineRoutes = require('./routes/creditLine');
 const { startWebhookProcessor } = require('./services/webhookProcessor');
 const { startHealthChecks } = require('./services/healthDigest');
 const { resumeOrphanedLoads } = require('./services/loadResumption');
-const { resumeCfBlockedInvoices } = require('./services/autoloader');
+const { resumeCfBlockedInvoices, renagHumanBlockades } = require('./services/autoloader');
 const { startReturnsDetector } = require('./services/returnsDetector');
 const { logger } = require('./services/logger');
 const { requireAdmin } = require('./middleware/auth');
@@ -240,4 +240,9 @@ app.listen(PORT, async () => {
   setInterval(() => {
     resumeCfBlockedInvoices().catch((err) => logger.error('CF auto-resume sweep failed', { error: err.message }));
   }, 10 * 60 * 1000);
+  // Re-nag human-required blockades (phone/email/captcha/login) every 30 min so a
+  // missed one-time alert can't strand a paid vendor for days (Claudia #831 sat 1.5d).
+  setInterval(() => {
+    renagHumanBlockades().catch((err) => logger.error('Human blockade re-nag sweep failed', { error: err.message }));
+  }, 30 * 60 * 1000);
 });
